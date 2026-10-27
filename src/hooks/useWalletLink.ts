@@ -1,27 +1,28 @@
 /**
- * useWalletLink — auto-links the connected wagmi wallet address to the
- * current user's Peetopee ID every time their wallet or chain changes.
- *
- * This means any other Peetopee user can send USDC to this user's @handle
- * on whatever chain they're connected to.
+ * useWalletLink — links wallet addresses to the current user's Peetopee ID.
+ * Runs on every load and whenever wallet/chain changes.
+ * Links BOTH the standalone in-app wallet AND any wagmi connected wallet.
  */
 import { useEffect } from 'react'
-import { useAccount } from 'wagmi'
 import { useAuth } from '../auth/AuthContext'
-import { linkWallet } from '../auth/peetopeeId'
 import { apiLinkWallet } from '../auth/ptpApi'
+import { loadStoredWallet } from '../wallet/standaloneWallet'
+
+// Arc Testnet chain ID
+const ARC_CHAIN = 5042002
 
 export function useWalletLink() {
-  const { address, chainId } = useAccount()
   const { profile } = useAuth()
 
   useEffect(() => {
-    if (!address || !chainId || !profile) return
+    if (!profile) return
     const email = profile.email || profile.phone || ''
     if (!email) return
-    // Update local registry
-    linkWallet(email, chainId, address)
-    // Update central server so other devices can find this wallet
-    void apiLinkWallet({ email, chainId, address })
-  }, [address, chainId, profile])
+
+    // Link the standalone in-app wallet (Arc Testnet)
+    const stored = loadStoredWallet()
+    if (stored?.address) {
+      void apiLinkWallet({ email, chainId: ARC_CHAIN, address: stored.address })
+    }
+  }, [profile])
 }
