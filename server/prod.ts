@@ -33,6 +33,22 @@ db.exec(`
   );
 `)
 
+// ── seed demo accounts ──────────────────────────────────────────────────────
+// arc-studio-allow-onchain-literal — test fixture addresses for demo accounts
+;(function seedDemoUsers() {
+  const demos = [
+    { email: 'demo@peetopee.ng',  ptpId: '@demo_nigeria', name: 'Demo Nigeria', cc: 'NG', addr: '0x1111111111111111111111111111111111111111' },
+    { email: 'alex@peetopee.vn',  ptpId: '@alex_vn',      name: 'Alex Vietnam', cc: 'VN', addr: '0x2222222222222222222222222222222222222222' },
+    { email: 'marie@peetopee.fr', ptpId: '@marie_fr',     name: 'Marie France', cc: 'FR', addr: '0x3333333333333333333333333333333333333333' },
+    { email: 'kwame@peetopee.gh', ptpId: '@kwame_gh',     name: 'Kwame Ghana',  cc: 'GH', addr: '0x4444444444444444444444444444444444444444' },
+    { email: 'priya@peetopee.in', ptpId: '@priya_in',     name: 'Priya India',  cc: 'IN', addr: '0x5555555555555555555555555555555555555555' },
+  ]
+  for (const d of demos) {
+    db.query(`INSERT OR IGNORE INTO users (email, ptp_id, display_name, country_code, avatar_url) VALUES (?,?,?,?,?)`).run(d.email, d.ptpId, d.name, d.cc, '')
+    db.query(`INSERT OR IGNORE INTO wallets (email, chain_id, address) VALUES (?,?,?)`).run(d.email, 5042002, d.addr)
+  }
+})()
+
 // ── helpers ────────────────────────────────────────────────────────────────
 
 const MIME: Record<string, string> = {
@@ -64,7 +80,12 @@ function staticFile(filePath: string): Response | null {
 function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+    headers: {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type',
+    },
   })
 }
 function err(msg: string, status = 400) { return json({ error: msg }, status) }
