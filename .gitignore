@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.env
+.env.local
+.env*.local
+*.db
+*.db-shm
+*.db-wal
+contracts/out/
+contracts/cache/
+contracts/broadcast/
+.forge-snapshots/
