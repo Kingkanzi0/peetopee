@@ -117,13 +117,26 @@ Bun.serve({
         const { email, ptpId, displayName, countryCode = '', avatarUrl = '' } = body
         if (!email || !ptpId || !displayName) return err('email, ptpId and displayName are required')
         const normalised = ptpId.startsWith('@') ? ptpId : `@${ptpId}`
-        const clash = db.query<{ email: string }, [string, string]>('SELECT email FROM users WHERE ptp_id = ? AND email != ?').get(normalised, email)
-        if (clash) return err('That Peetopee ID is already taken', 409)
-        db.query(`INSERT INTO users (email, ptp_id, display_name, country_code, avatar_url)
-          VALUES (?, ?, ?, ?, ?)
-          ON CONFLICT(email) DO UPDATE SET ptp_id=excluded.ptp_id, display_name=excluded.display_name,
-          country_code=excluded.country_code, avatar_url=CASE WHEN excluded.avatar_url!='' THEN excluded.avatar_url ELSE avatar_url END`
-        ).run(email, normalised, displayName, countryCode, avatarUrl)
+        // Check if this email already has an account — if so keep their existing ptp_id
+        type UserRow = { ptp_id: string }
+        const existing = db.query<UserRow, string>('SELECT ptp_id FROM users WHERE email = ?').get(email)
+        if (existing) {
+          // Update name/country/avatar but NEVER change the ptp_id
+          db.query(`UPDATE users SET display_name=?, country_code=?, avatar_url=CASE WHEN ?!='' THEN ? ELSE avatar_url END WHERE email=?`)
+            .run(displayName, countryCode, avatarUrl, avatarUrl, email)
+          return json({ ok: true, ptpId: existing.ptp_id })
+        }
+        // New user — check handle uniqueness then insert
+        const clash = db.query<UserRow, string>('SELECT ptp_id FROM users WHERE ptp_id = ?').get(normalised)
+        if (clash) {
+          // Handle taken — generate a variant by appending random digits
+          const variant = normalised.replace(/@/, '@') + Math.floor(10 + Math.random() * 89)
+          db.query(`INSERT INTO users (email, ptp_id, display_name, country_code, avatar_url) VALUES (?,?,?,?,?)`)
+            .run(email, variant, displayName, countryCode, avatarUrl)
+          return json({ ok: true, ptpId: variant })
+        }
+        db.query(`INSERT INTO users (email, ptp_id, display_name, country_code, avatar_url) VALUES (?,?,?,?,?)`)
+          .run(email, normalised, displayName, countryCode, avatarUrl)
         return json({ ok: true, ptpId: normalised })
       }
 

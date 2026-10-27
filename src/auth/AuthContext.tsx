@@ -55,13 +55,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     clearPin()
     // Assign a local Peetopee ID for this user
     const localRecord = registerPtpId(p.email || p.phone || 'user', p.name, p.avatarDataUrl)
-    // Also register on the central server so any device can find this user
+    // Also register on the central server so any device can find this user.
+    // The server may return a different ptpId (e.g. if re-registering with same email)
+    // — sync it back to localStorage so the local ID always matches the server.
     void apiRegister({
       email: p.email || p.phone || 'user',
       ptpId: localRecord.ptpId,
       displayName: p.name,
       countryCode: p.country?.code ?? '',
       avatarUrl: p.avatarDataUrl ?? '',
+    }).then(res => {
+      if (res.ok && res.ptpId && res.ptpId !== localRecord.ptpId) {
+        // Server assigned a different ID — update localStorage to match
+        const registry = JSON.parse(localStorage.getItem('ptp_id_registry') ?? '{}') as Record<string, { ptpId: string }>
+        const key = p.email || p.phone || 'user'
+        if (registry[key]) registry[key].ptpId = res.ptpId
+        localStorage.setItem('ptp_id_registry', JSON.stringify(registry))
+        localStorage.setItem('ptp_my_id', res.ptpId)
+      }
     })
     saveProfile(p)
     setProfile(p)
