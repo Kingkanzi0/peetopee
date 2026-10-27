@@ -1,171 +1,145 @@
 /**
- * Peetopee API server — Bun + bun:sqlite
- * Stores Peetopee ID registrations centrally so any device can find any user.
- * Runs on port 3001; Vite proxies /api/* to it.
+ * Peetopee API Server
+ * Runs on Bun. Uses SQLite when DB_PATH is set, falls back to in-memory Map.
  */
+
 import { Database } from 'bun:sqlite'
-import { join } from 'path'
+import { existsSync, mkdirSync } from 'fs'
+import { dirname } from 'path'
 
-const DB_PATH = process.env.DB_PATH ?? join(import.meta.dir, '../data/peetopee.db')
+const PORT = parseInt(process.env.PORT ?? '3001')
+const DB_PATH = process.env.DB_PATH
 
-// Ensure data directory exists
-import { mkdirSync } from 'fs'
-mkdirSync(join(import.meta.dir, '../data'), { recursive: true })
-
-const db = new Database(DB_PATH, { create: true })
-
-// Crash-safe WAL mode (skill requirement)
-db.exec(`PRAGMA journal_mode=WAL`)
-db.exec(`PRAGMA synchronous=FULL`)
-db.exec(`PRAGMA busy_timeout=5000`)
-
-db.exec(`
-  CREATE TABLE IF NOT EXISTS users (
-    email        TEXT PRIMARY KEY,
-    ptp_id       TEXT UNIQUE NOT NULL,
-    display_name TEXT NOT NULL,
-    country_code TEXT NOT NULL DEFAULT '',
-    avatar_url   TEXT NOT NULL DEFAULT '',
-    created_at   INTEGER NOT NULL DEFAULT (unixepoch())
-  );
-
-  CREATE TABLE IF NOT EXISTS wallets (
-    email    TEXT NOT NULL,
-    chain_id INTEGER NOT NULL,
-    address  TEXT NOT NULL,
-    PRIMARY KEY (email, chain_id)
-  );
-`)
-
-// ── helpers ────────────────────────────────────────────────────────────────
-
-function json(data: unknown, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
-  })
+interface User {
+  email: string
+  ptpId: string
+  displayName: string
+  countryCode: string
+  avatarUrl: string
+  walletAddresses: Record<number, string>
 }
 
-function err(msg: string, status = 400) {
-  return json({ error: msg }, status)
+let db: Database | null = null
+const memStore = new Map<string, User>()
+
+function initDb() {
+  if (!DB_PATH) return
+  try {
+    const dir = dirname(DB_PATH)
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+    db = new Database(DB_PATH)
+    db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;')
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS users (
+        email TEXT PRIMARY KEY,
+        ptpId TEXT UNIQUE NOT NULL,
+        displayName TEXT NOT NULL,
+        countryCode TEXT DEFAULT '',
+        avatarUrl TEXT DEFAULT '',
+        wallets TEXT DEFAULT '{}'
+      );
+    `)
+  } catch (e) {
+    console.warn('SQLite init failed, using in-memory store:', e)
+    db = null
+  }
 }
 
-function cors() {
-  return new Response(null, {
-    status: 204,
-    headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
-    },
-  })
+function getUser(email: string): User | null {
+  if (db) {
+    const row = db.query<Record<string, string>, string>('SELECT * FROM users WHERE email = ?').get(email.toLowerCase())
+    if (!row) return null
+    return { ...row, walletAddresses: JSON.parse(row.wallets ?? '{}') } as User
+  }
+  return memStore.get(email.toLowerCase()) ?? null
 }
 
-// ── routes ─────────────────────────────────────────────────────────────────
+function getUserByPtpId(ptpId: string): User | null {
+  const id = ptpId.startsWith('@') ? ptpId : `@${ptpId}`
+  if (db) {
+    const row = db.query<Record<string, string>, string>('SELECT * FROM users WHERE ptpId = ?').get(id)
+    if (!row) return null
+    return { ...row, walletAddresses: JSON.parse(row.wallets ?? '{}') } as User
+  }
+  for (const u of memStore.values()) {
+    if (u.ptpId === id) return u
+  }
+  return null
+}
 
-const server = Bun.serve({
-  port: 3001,
+function upsertUser(u: User) {
+  const email = u.email.toLowerCase()
+  if (db) {
+    db.query(`INSERT INTO users (email,ptpId,displayName,countryCode,avatarUrl,wallets) VALUES (?,?,?,?,?,?)
+      ON CONFLICT(email) DO UPDATE SET displayName=excluded.displayName,countryCode=excluded.countryCode,avatarUrl=excluded.avatarUrl`)
+      .run(email, u.ptpId, u.displayName, u.countryCode, u.avatarUrl, JSON.stringify(u.walletAddresses))
+    return
+  }
+  const existing = memStore.get(email)
+  memStore.set(email, { ...u, email, ptpId: existing?.ptpId ?? u.ptpId, walletAddresses: existing?.walletAddresses ?? u.walletAddresses })
+}
 
-  async fetch(req) {
-    const url = new URL(req.url)
-    const path = url.pathname.replace(/^\/api/, '')
+function updateWallet(email: string, chainId: number, address: string) {
+  const e = email.toLowerCase()
+  if (db) {
+    const row = db.query<{ wallets: string }, string>('SELECT wallets FROM users WHERE email = ?').get(e)
+    if (!row) return
+    const w = JSON.parse(row.wallets ?? '{}') as Record<number, string>
+    w[chainId] = address
+    db.query('UPDATE users SET wallets = ? WHERE email = ?').run(JSON.stringify(w), e)
+    return
+  }
+  const u = memStore.get(e)
+  if (!u) return
+  memStore.set(e, { ...u, walletAddresses: { ...u.walletAddresses, [chainId]: address } })
+}
 
-    if (req.method === 'OPTIONS') return cors()
+function seedDemoUsers() {
+  // arc-studio-allow-onchain-literal — test fixture addresses for demo accounts
+  const demos: User[] = [
+    { email: 'demo@peetopee.ng',  ptpId: '@demo_nigeria', displayName: 'Demo Nigeria', countryCode: 'NG', avatarUrl: '', walletAddresses: { 5042002: '0x1111111111111111111111111111111111111111' } },
+    { email: 'alex@peetopee.vn',  ptpId: '@alex_vn',      displayName: 'Alex Vietnam', countryCode: 'VN', avatarUrl: '', walletAddresses: { 5042002: '0x2222222222222222222222222222222222222222' } },
+    { email: 'marie@peetopee.fr', ptpId: '@marie_fr',     displayName: 'Marie France', countryCode: 'FR', avatarUrl: '', walletAddresses: { 5042002: '0x3333333333333333333333333333333333333333' } },
+    { email: 'kwame@peetopee.gh', ptpId: '@kwame_gh',     displayName: 'Kwame Ghana',  countryCode: 'GH', avatarUrl: '', walletAddresses: { 5042002: '0x4444444444444444444444444444444444444444' } },
+    { email: 'priya@peetopee.in', ptpId: '@priya_in',     displayName: 'Priya India',  countryCode: 'IN', avatarUrl: '', walletAddresses: { 5042002: '0x5555555555555555555555555555555555555555' } },
+  ]
+  for (const u of demos) { if (!getUser(u.email)) upsertUser(u) }
+}
 
-    // POST /register — create or update a user's Peetopee profile
-    if (req.method === 'POST' && path === '/register') {
-      const body = await req.json() as {
-        email: string
-        ptpId: string
-        displayName: string
-        countryCode?: string
-        avatarUrl?: string
-      }
+function cors() { return { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' } }
+function json(data: unknown, status = 200) { return new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json', ...cors() } }) }
 
-      const { email, ptpId, displayName, countryCode = '', avatarUrl = '' } = body
+async function handle(req: Request): Promise<Response> {
+  const url = new URL(req.url)
+  const path = url.pathname.replace(/^\/api/, '')
+  if (req.method === 'OPTIONS') return json({})
+  if (path === '/health') return json({ ok: true, ts: Date.now() })
+  if (path === '/register' && req.method === 'POST') {
+    const body = await req.json() as Record<string, string>
+    const { email, ptpId, displayName, countryCode = '', avatarUrl = '' } = body
+    if (!email || !ptpId || !displayName) return json({ ok: false, error: 'missing fields' }, 400)
+    const existing = getUser(email)
+    upsertUser({ email, ptpId: existing?.ptpId ?? ptpId, displayName, countryCode, avatarUrl, walletAddresses: existing?.walletAddresses ?? {} })
+    return json({ ok: true, ptpId: existing?.ptpId ?? ptpId })
+  }
+  if (path === '/lookup' && req.method === 'GET') {
+    const q = url.searchParams.get('q')?.trim() ?? ''
+    if (!q) return json({ found: false })
+    const user = q.includes('@') && !q.startsWith('@') ? getUser(q) : getUserByPtpId(q)
+    if (!user) return json({ found: false })
+    return json({ found: true, user: { ...user, avatarUrl: '' } })
+  }
+  if (path === '/link-wallet' && req.method === 'POST') {
+    const body = await req.json() as Record<string, unknown>
+    const { email, chainId, address } = body as { email: string; chainId: number; address: string }
+    if (!email || !chainId || !address) return json({ ok: false, error: 'missing fields' }, 400)
+    updateWallet(email, chainId, address)
+    return json({ ok: true })
+  }
+  return json({ error: 'Not found' }, 404)
+}
 
-      if (!email || !ptpId || !displayName) return err('email, ptpId and displayName are required')
-
-      const normalised = ptpId.startsWith('@') ? ptpId : `@${ptpId}`
-
-      // Check handle uniqueness (allow re-registration with same email)
-      const existing = db.query<{ email: string }, string>(
-        'SELECT email FROM users WHERE ptp_id = ? AND email != ?'
-      ).get(normalised, email)
-
-      if (existing) return err('That Peetopee ID is already taken', 409)
-
-      db.query(`
-        INSERT INTO users (email, ptp_id, display_name, country_code, avatar_url)
-        VALUES (?, ?, ?, ?, ?)
-        ON CONFLICT(email) DO UPDATE SET
-          ptp_id = excluded.ptp_id,
-          display_name = excluded.display_name,
-          country_code = excluded.country_code,
-          avatar_url = CASE WHEN excluded.avatar_url != '' THEN excluded.avatar_url ELSE avatar_url END
-      `).run(email, normalised, displayName, countryCode, avatarUrl)
-
-      return json({ ok: true, ptpId: normalised })
-    }
-
-    // GET /lookup?q=@handle_or_email — find a user by handle or email
-    if (req.method === 'GET' && path === '/lookup') {
-      const q = url.searchParams.get('q')?.trim()
-      if (!q) return err('q is required')
-
-      const isHandle = q.startsWith('@') || !q.includes('@')
-      const term = isHandle ? (q.startsWith('@') ? q : `@${q}`) : q
-
-      type Row = { email: string; ptp_id: string; display_name: string; country_code: string; avatar_url: string }
-
-      const user = isHandle
-        ? db.query<Row, string>('SELECT * FROM users WHERE ptp_id = ?').get(term)
-        : db.query<Row, string>('SELECT * FROM users WHERE email = ?').get(term)
-
-      if (!user) return json({ found: false })
-
-      // Get linked wallet addresses
-      const walletRows = db.query<{ chain_id: number; address: string }, string>(
-        'SELECT chain_id, address FROM wallets WHERE email = ?'
-      ).all(user.email)
-
-      const walletAddresses: Record<number, string> = {}
-      for (const w of walletRows) walletAddresses[w.chain_id] = w.address
-
-      return json({
-        found: true,
-        user: {
-          email: user.email,
-          ptpId: user.ptp_id,
-          displayName: user.display_name,
-          countryCode: user.country_code,
-          avatarUrl: user.avatar_url,
-          walletAddresses,
-        },
-      })
-    }
-
-    // POST /link-wallet — associate a wallet address with a user on a chain
-    if (req.method === 'POST' && path === '/link-wallet') {
-      const body = await req.json() as { email: string; chainId: number; address: string }
-      const { email, chainId, address } = body
-
-      if (!email || !chainId || !address) return err('email, chainId and address are required')
-
-      db.query(`
-        INSERT INTO wallets (email, chain_id, address)
-        VALUES (?, ?, ?)
-        ON CONFLICT(email, chain_id) DO UPDATE SET address = excluded.address
-      `).run(email, chainId, address)
-
-      return json({ ok: true })
-    }
-
-    // GET /health
-    if (path === '/health') return json({ ok: true, ts: Date.now() })
-
-    return err('Not found', 404)
-  },
-})
-
-console.log(`Peetopee API running on http://localhost:${server.port}`)
+initDb()
+seedDemoUsers()
+Bun.serve({ port: PORT, fetch: handle })
+console.log(`Peetopee API running on http://localhost:${PORT}`)

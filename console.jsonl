@@ -253,3 +253,15 @@
 {"level":"log","message":"error {\"isTrusted\":true}","timestamp":1793117365929}
 {"level":"log","message":"An error occurred: {\"isTrusted\":true}","timestamp":1793117365929}
 {"level":"warn","message":"The configured WalletConnect 'metadata.url':https://reekystem-app-c461974f-1d1c-45bb-9a5b-bb8590159ba7.static.hf.space differs from the actual page url:https://i4x0ddndpg96miks77d98.preview.studio.arc.io. This is probably unintended and can lead to issues.","timestamp":1793117375007}
+{"level":"warn","message":"The configured WalletConnect 'metadata.url':https://reekystem-app-c461974f-1d1c-45bb-9a5b-bb8590159ba7.static.hf.space differs from the actual page url:https://i4x0ddndpg96miks77d98.preview.studio.arc.io. This is probably unintended and can lead to issues.","timestamp":1793117416544}
+{"level":"warn","message":"The configured WalletConnect 'metadata.url':https://reekystem-app-c461974f-1d1c-45bb-9a5b-bb8590159ba7.static.hf.space differs from the actual page url:https://i4x0ddndpg96miks77d98.preview.studio.arc.io. This is probably unintended and can lead to issues.","timestamp":1793117419444}
+{"level":"warn","message":"The configured WalletConnect 'metadata.url':https://reekystem-app-c461974f-1d1c-45bb-9a5b-bb8590159ba7.static.hf.space differs from the actual page url:https://i4x0ddndpg96miks77d98.preview.studio.arc.io. This is probably unintended and can lead to issues.","timestamp":1793117422504}
+{"level":"log","message":"restart sse, about to listen","timestamp":1793117719203}
+{"level":"log","message":"listen https://wallet.binance.com/tonbridge/bridge/events?client_id=2b0ba3bdefdef14f450d36a87fe881e273f27fab65455df2290db04850a41058&user_info=","timestamp":1793117719205}
+{"level":"log","message":"open {\"isTrusted\":true}","timestamp":1793117719672}
+{"level":"log","message":"restart sse, about to listen","timestamp":1793117719718}
+{"level":"log","message":"listen https://wallet.binance.com/tonbridge/bridge/events?client_id=2b0ba3bdefdef14f450d36a87fe881e273f27fab65455df2290db04850a41058&user_info=","timestamp":1793117719719}
+{"level":"log","message":"open {\"isTrusted\":true}","timestamp":1793117720129}
+{"level":"log","message":"error {\"isTrusted\":true}","timestamp":1793117940838}
+{"level":"log","message":"An error occurred: {\"isTrusted\":true}","timestamp":1793117940838}
+{"level":"warn","message":"The configured WalletConnect 'metadata.url':https://reekystem-app-c461974f-1d1c-45bb-9a5b-bb8590159ba7.static.hf.space differs from the actual page url:https://i4x0ddndpg96miks77d98.preview.studio.arc.io. This is probably unintended and can lead to issues.","timestamp":1793117956069}
