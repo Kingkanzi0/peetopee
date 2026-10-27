@@ -108,9 +108,9 @@ Bun.serve({
 
     if (req.method === 'OPTIONS') return cors()
 
-    // ── API routes ──────────────────────────────────────────────────────────
-    if (path.startsWith('/api')) {
-      const route = path.replace(/^\/api/, '')
+    // ── API routes — handle both /api/route and /route directly ────────────
+    if (path.startsWith('/api') || path === '/register' || path === '/lookup' || path === '/link-wallet' || path === '/health') {
+      const route = path.startsWith('/api') ? path.replace(/^\/api/, '') : path
 
       if (req.method === 'POST' && route === '/register') {
         const body = await req.json() as { email: string; ptpId: string; displayName: string; countryCode?: string; avatarUrl?: string }
