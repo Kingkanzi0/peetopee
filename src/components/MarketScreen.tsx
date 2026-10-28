@@ -220,7 +220,7 @@ export function MarketScreen({ onStartTrade, onPayBank, onSendById }: MarketScre
               className="rounded-2xl p-4 text-left transition-all active:scale-[0.98]"
               style={{ background: 'linear-gradient(135deg, #0f2557 0%, #1d4ed8 100%)' }}>
               <Building2 className="size-6 text-white mb-3" />
-              <div className="text-sm font-bold text-white">Pay a bank account</div>
+              <div className="text-sm font-bold text-white">Send to bank</div>
               <div className="text-xs text-white/70 mt-0.5">USDC in, naira out — OPay, UBA, GTBank…</div>
             </button>
           )}

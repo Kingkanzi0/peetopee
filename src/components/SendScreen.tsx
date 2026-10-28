@@ -12,7 +12,7 @@ import { SendUsdcByPtpId } from './SendUsdcByPtpId'
 import { TransactionHistory } from './TransactionHistory'
 
 interface Props {
-  /** Open "Pay a bank account" (local currency paid out by a verified trader). */
+  /** Open "Send to bank" (local currency paid out by a verified trader). */
   onPayBank: () => void
   /** Open straight on "Send USDC by Peetopee ID". */
   startWithUsdc?: boolean
@@ -78,7 +78,7 @@ export function SendScreen({ onPayBank, startWithUsdc }: Props) {
             <Building2 className="size-6 text-emerald-600" />
           </div>
           <div className="flex-1">
-            <div className="font-bold text-sm mb-0.5" style={{ color: 'var(--ink)' }}>Pay a bank account</div>
+            <div className="font-bold text-sm mb-0.5" style={{ color: 'var(--ink)' }}>Send to bank</div>
             <div className="text-xs" style={{ color: 'var(--muted)' }}>
               Naira into OPay, UBA, GTBank or any bank. A verified trader sends it; your USDC stays in escrow until it arrives.
             </div>

@@ -7,40 +7,21 @@
  * Both are shown in USDC and in the currency of the country you're visiting.
  * To sell, move USDC Wallet → Funds first.
  */
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import type { Address } from 'viem'
 import {
   ArrowDownToLine, ArrowUpFromLine, Loader2, MapPin, ShoppingBag, Wallet2, Briefcase, X, CheckCircle2,
 } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import { COUNTRIES, getCountryByCode, type CountryDef } from '../contracts/peetopee'
-import { useLocalCurrency } from '../hooks/useLocalCurrency'
 import {
   useAppWallet, useUsdcBalance, maxSendable, sendUsdcOnArc, waitForArcTx, friendlyTxError, GAS_RESERVE_USDC,
 } from '../wallet/appWallet'
 import { recordTx, updateTxStatus } from '../history/txHistory'
 import { TransactionHistory } from './TransactionHistory'
 
-const VISITING_KEY = 'ptp_visiting_country'
-
-/** The country you're in right now (defaults to your home country). Shared across screens. */
-export function useVisitingCountry(): [CountryDef | undefined, (c: CountryDef) => void] {
-  const { profile } = useAuth()
-  const read = () => { try { return localStorage.getItem(VISITING_KEY) } catch { return null } }
-  const [code, setCode] = useState<string | null>(read)
-  useEffect(() => {
-    const sync = () => setCode(read())
-    window.addEventListener('ptp-visiting-changed', sync)
-    return () => window.removeEventListener('ptp-visiting-changed', sync)
-  }, [])
-  const country = (code && getCountryByCode(code)) || profile?.country
-  function set(c: CountryDef) {
-    try { localStorage.setItem(VISITING_KEY, c.code) } catch { /* ignore */ }
-    setCode(c.code)
-    window.dispatchEvent(new Event('ptp-visiting-changed'))
-  }
-  return [country, set]
-}
+export { useVisitingCountry } from '../hooks/useMoney'
+import { useVisitingCountry, useMoney } from '../hooks/useMoney'
 
 function formatLocal(amount: number, c: CountryDef) {
   const digits = amount >= 1000 ? 0 : 2
@@ -56,7 +37,8 @@ export function FundsScreen({ onSell, onOpenWallet }: Props) {
   const { profile } = useAuth()
   const { wallet, unlocked } = useAppWallet()
   const [visiting, setVisiting] = useVisitingCountry()
-  const { rate, source } = useLocalCurrency(visiting?.currency ?? 'USD')
+  const money = useMoney()
+  const { rate, rateSource: source } = money
   const funds = useUsdcBalance(wallet?.fundsAddress)
   const main = useUsdcBalance(wallet?.address)
   const [move, setMove] = useState<'to_funds' | 'from_funds' | null>(null)
@@ -74,7 +56,6 @@ export function FundsScreen({ onSell, onOpenWallet }: Props) {
     )
   }
 
-  const local = (usdc: number | null) => (usdc != null && rate != null && visiting ? formatLocal(usdc * rate, visiting) : '—')
 
   return (
     <div className="max-w-lg mx-auto px-4 pt-4 pb-8">
@@ -105,13 +86,14 @@ export function FundsScreen({ onSell, onOpenWallet }: Props) {
           <Briefcase className="size-4 text-white/60" />
           <span className="text-xs text-white/70 font-medium">Funds balance · used for selling</span>
         </div>
-        <div className="text-3xl font-bold text-white tabular-nums">
-          {funds.balance == null ? '—' : funds.balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-          <span className="text-base font-semibold text-white/70"> USDC</span>
-        </div>
-        <div className="text-sm text-white/70 mt-0.5 tabular-nums">
-          ≈ {local(funds.balance)} {visiting?.currency}
-        </div>
+        <button onClick={money.toggle} className="text-left">
+          <div className="text-3xl font-bold text-white tabular-nums">
+            {funds.balance == null ? '—' : money.primary(funds.balance)}
+          </div>
+          <div className="text-sm text-white/70 mt-0.5 tabular-nums">
+            {funds.balance == null ? '' : money.secondary(funds.balance)}
+          </div>
+        </button>
         <div className="grid grid-cols-2 gap-2 mt-4">
           <button onClick={() => setMove('to_funds')} disabled={!unlocked}
             className="rounded-xl py-2.5 text-sm font-semibold flex items-center justify-center gap-1.5 disabled:opacity-50"
@@ -134,8 +116,8 @@ export function FundsScreen({ onSell, onOpenWallet }: Props) {
         <div className="flex-1 min-w-0">
           <div className="text-xs" style={{ color: 'var(--muted)' }}>Wallet balance</div>
           <div className="text-base font-bold tabular-nums" style={{ color: 'var(--ink)' }}>
-            {main.balance == null ? '—' : main.balance.toFixed(2)} USDC
-            <span className="text-xs font-medium ml-1.5" style={{ color: 'var(--muted)' }}>≈ {local(main.balance)}</span>
+            {main.balance == null ? '—' : money.primary(main.balance)}
+            <span className="text-xs font-medium ml-1.5" style={{ color: 'var(--muted)' }}>{main.balance == null ? '' : money.secondary(main.balance)}</span>
           </div>
         </div>
         <button onClick={() => setMove('from_funds')} disabled={!unlocked || !funds.balance}

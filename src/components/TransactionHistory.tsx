@@ -7,6 +7,7 @@ import {
   ArrowDownLeft, ArrowUpRight, ArrowLeftRight, Lock, Unlock, ExternalLink, RefreshCw, Clock, XCircle,
 } from 'lucide-react'
 import { useAppWallet } from '../wallet/appWallet'
+import { useMoney } from '../hooks/useMoney'
 import {
   loadHistory, subscribeHistory, KIND_LABELS, direction, explorerTxUrl,
   type HistoryEntry, type TxKind,
@@ -95,6 +96,7 @@ export function TransactionHistory({ title = 'Transaction history', compact, fil
 }
 
 function Row({ e }: { e: HistoryEntry }) {
+  const money = useMoney()
   const dir = direction(e.kind)
   const Icon = ICONS[e.kind]
   const color = dir === 'in' ? '#16a34a' : dir === 'out' ? 'var(--danger)' : 'var(--accent)'
@@ -122,8 +124,11 @@ function Row({ e }: { e: HistoryEntry }) {
       </div>
       <div className="text-right shrink-0">
         <div className="text-sm font-bold tabular-nums" style={{ color: e.status === 'failed' ? 'var(--subtle)' : color }}>
-          {sign}{Number(e.amount).toLocaleString(undefined, { maximumFractionDigits: 2 })} USDC
+          {sign}{money.primary(Number(e.amount))}
         </div>
+        {money.hasLocal && (
+          <div className="text-[11px] tabular-nums" style={{ color: 'var(--subtle)' }}>{money.secondary(Number(e.amount))}</div>
+        )}
         <ExternalLink className="size-3 ml-auto mt-0.5" style={{ color: 'var(--subtle)' }} />
       </div>
     </a>

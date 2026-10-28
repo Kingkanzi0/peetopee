@@ -139,7 +139,7 @@ export function PayBankScreen({ initialCountry, onBack, onTradeCreated, onAddFun
           <Building2 className="size-6 text-emerald-600" />
         </div>
         <div>
-          <h1 className="text-xl font-bold display" style={{ color: 'var(--ink)' }}>Pay a bank account</h1>
+          <h1 className="text-xl font-bold display" style={{ color: 'var(--ink)' }}>Send to bank</h1>
           <p className="text-sm" style={{ color: 'var(--muted)' }}>
             Pay {country.currency} into any {country.name} bank account with your USDC. A verified local trader sends the money; your USDC stays in escrow until it arrives.
           </p>

@@ -18,6 +18,7 @@ import {
 } from '../wallet/appWallet'
 import { recordTx, updateTxStatus, explorerTxUrl } from '../history/txHistory'
 import { TransactionHistory } from './TransactionHistory'
+import { useMoney } from '../hooks/useMoney'
 
 const ARC_CHAIN_ID = 5042002
 const LOOKUP_DELAY_MS = 450
@@ -64,7 +65,12 @@ export function SendUsdcByPtpId({ onBack }: Props) {
   const [errMsg, setErrMsg] = useState('')
   const lookupSeq = useRef(0)
 
-  const amountNum = parseFloat(amount.replace(/,/g, '')) || 0
+  // Amounts can be typed in local currency (e.g. ₦) or USDC; USDC is what's actually sent.
+  const money = useMoney()
+  const [inLocal, setInLocal] = useState(money.showLocal)
+  const typed = parseFloat(amount.replace(/,/g, '')) || 0
+  const amountNum = inLocal ? Math.floor((money.toUsdc(typed) ?? 0) * 1e6) / 1e6 : typed
+  const localLabel = money.local(amountNum) // e.g. "₦10,000"
   const recipientAddress = (recipient?.walletAddresses[ARC_CHAIN_ID] ?? null) as Address | null
   const isSelf = !!recipient && recipient.ptpId === profile?.ptpId
   const maxAmount = maxSendable(balance)
@@ -110,7 +116,10 @@ export function SendUsdcByPtpId({ onBack }: Props) {
       const sent = await sendUsdcOnArc('wallet', recipientAddress, amountNum.toFixed(6))
       hash = sent
       setTxHash(sent)
-      recordTx({ hash: sent, chainId: ARC_CHAIN_ID, kind: 'sent', amount: String(amountNum), counterparty: recipient.ptpId, note: recipient.displayName })
+      recordTx({
+        hash: sent, chainId: ARC_CHAIN_ID, kind: 'sent', amount: String(amountNum), counterparty: recipient.ptpId,
+        note: inLocal && money.country ? `${money.country.currencySymbol}${typed.toLocaleString()} · ${recipient.displayName}` : recipient.displayName,
+      })
       await waitForArcTx(sent)
       updateTxStatus(sent, 'confirmed')
       refreshBalance()
@@ -135,7 +144,7 @@ export function SendUsdcByPtpId({ onBack }: Props) {
       </div>
       <h2 className="text-2xl font-black mb-1 display" style={{ color: 'var(--ink)' }}>USDC sent!</h2>
       <p className="text-base font-semibold mb-1" style={{ color: 'var(--ink)' }}>
-        {amountNum.toLocaleString()} USDC → {recipient?.displayName}
+        {inLocal && money.country ? `${money.country.currencySymbol}${typed.toLocaleString()}` : `${amountNum.toLocaleString()} USDC`} → {recipient?.displayName}
       </p>
       <p className="text-sm mb-1" style={{ color: 'var(--muted)' }}>{recipient?.ptpId} · Arc</p>
       {txHash && (
@@ -169,7 +178,8 @@ export function SendUsdcByPtpId({ onBack }: Props) {
           </div>
         </div>
         <Row label="Network" value="Arc" />
-        <Row label="Amount" value={`${amountNum.toLocaleString()} USDC`} bold />
+        {inLocal && money.country && <Row label="They get" value={`${money.country.currencySymbol}${typed.toLocaleString()} (≈)`} bold />}
+        <Row label={inLocal ? 'USDC sent' : 'Amount'} value={`${amountNum.toLocaleString(undefined, { maximumFractionDigits: 6 })} USDC`} bold={!inLocal} />
         <Row label="Network fee" value="< 0.01 USDC" />
         <div className="pt-2.5" style={{ borderTop: '1px solid var(--border)' }}>
           <p className="text-xs" style={{ color: 'var(--subtle)' }}>Recipient wallet</p>
@@ -183,7 +193,7 @@ export function SendUsdcByPtpId({ onBack }: Props) {
         className="w-full rounded-2xl py-4 text-sm font-bold text-white flex items-center justify-center gap-2 disabled:opacity-50 transition-all active:scale-[0.98]"
         style={{ background: 'var(--accent)' }}
       >
-        {sending ? <><Loader2 className="size-4 animate-spin" /> Sending…</> : <>Send {amountNum} USDC <ChevronRight className="size-4" /></>}
+        {sending ? <><Loader2 className="size-4 animate-spin" /> Sending…</> : <>Send {inLocal && localLabel ? `${money.country!.currencySymbol}${typed.toLocaleString()}` : `${amountNum} USDC`} <ChevronRight className="size-4" /></>}
       </button>
     </div>
   )
@@ -204,18 +214,30 @@ export function SendUsdcByPtpId({ onBack }: Props) {
       </div>
 
       <div className="mb-6">
-        <div className="flex justify-between mb-1.5">
-          <label className="text-xs font-semibold" style={{ color: 'var(--subtle)' }}>AMOUNT (USDC)</label>
+        <div className="flex justify-between items-center mb-1.5">
+          {money.hasLocal ? (
+            <div className="flex rounded-lg p-0.5" style={{ background: 'var(--surface-muted)' }}>
+              {([true, false] as const).map(local => (
+                <button key={String(local)} onClick={() => { setInLocal(local); setAmount('') }}
+                  className="rounded-md px-2.5 py-1 text-xs font-semibold"
+                  style={{ background: inLocal === local ? 'white' : 'transparent', color: inLocal === local ? 'var(--ink)' : 'var(--muted)' }}>
+                  {local ? money.country!.currency : 'USDC'}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <label className="text-xs font-semibold" style={{ color: 'var(--subtle)' }}>AMOUNT (USDC)</label>
+          )}
           <button className="text-xs font-semibold" style={{ color: 'var(--accent)' }} disabled={balance == null}
-            onClick={() => setAmount(String(maxAmount))}>
-            Wallet: {balance == null ? '…' : balance.toFixed(2)} · Max
+            onClick={() => setAmount(inLocal ? String(Math.floor(money.toLocal(maxAmount) ?? 0)) : String(maxAmount))}>
+            Wallet: {balance == null ? '…' : money.primary(balance)} · Max
           </button>
         </div>
         <input
-          type="text" inputMode="decimal" placeholder="0.00" value={amount}
+          type="text" inputMode="decimal" placeholder={inLocal ? `${money.country?.currencySymbol ?? ''}0` : '0.00'} value={amount}
           onChange={e => {
             const v = e.target.value.replace(/[^0-9.]/g, '')
-            if (/^\d*\.?\d{0,6}$/.test(v)) setAmount(v)
+            if (inLocal ? /^\d*\.?\d{0,2}$/.test(v) : /^\d*\.?\d{0,6}$/.test(v)) setAmount(v)
           }}
           className="w-full rounded-2xl px-4 py-4 text-2xl font-black outline-none text-center"
           style={{
@@ -225,9 +247,19 @@ export function SendUsdcByPtpId({ onBack }: Props) {
             fontSize: 'max(16px, 1.5rem)',
           }}
         />
+        {amountNum > 0 && !tooMuch && (
+          <p className="text-xs mt-1.5 text-center tabular-nums" style={{ color: 'var(--muted)' }}>
+            {inLocal ? `= ${amountNum.toLocaleString(undefined, { maximumFractionDigits: 4 })} USDC` : localLabel ? `≈ ${localLabel}` : ''}
+          </p>
+        )}
         {tooMuch && (
           <p className="text-xs mt-1.5 text-center" style={{ color: 'var(--danger)' }}>
-            Max {maxAmount} USDC — we keep {GAS_RESERVE_USDC} USDC for the network fee.
+            Max {money.primary(maxAmount)} — we keep {GAS_RESERVE_USDC} USDC for the network fee.
+          </p>
+        )}
+        {inLocal && (
+          <p className="text-[11px] mt-1 text-center" style={{ color: 'var(--subtle)' }}>
+            Sent as USDC at today's rate. It arrives in their Peetopee account instantly, and they can send it on to any bank.
           </p>
         )}
       </div>

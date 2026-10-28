@@ -13,7 +13,9 @@ import {
   calcLocalAmount,
 } from '../contracts/peetopee'
 import { Amount, parseAmount, usdcDecimalsFor } from '../onchain-money'
-import { maxSendable, friendlyTxError } from '../wallet/appWallet'
+import {
+  maxSendable, friendlyTxError, useAppWallet, useUsdcBalance, sendUsdcOnArc, waitForArcTx,
+} from '../wallet/appWallet'
 import { recordTx, updateTxStatus } from '../history/txHistory'
 import { KycGate } from './KycFlow'
 import { uploadBankDetails } from './TradeBankDetails'
@@ -25,7 +27,7 @@ interface Props {
   onTradeCreated: (tradeId: bigint) => void
   /** Opens the Funds tab so the user can move USDC Wallet → Funds. */
   onAddFunds: () => void
-  /** Skip straight to the confirm step with these values (used by "Pay a bank account"). */
+  /** Skip straight to the confirm step with these values (used by "Send to bank"). */
   prefill?: { amount: string; bankDetails: string }
 }
 
@@ -62,7 +64,7 @@ function SellFlowInner({ country, trader, onBack, onTradeCreated, onAddFunds, pr
   const maxFmt = Amount.fromRaw(trader.maxOrderUsdc, decimals).toFixed(0)
 
   // Funds balance
-  const { data: rawBalance } = useReadContract({
+  const { data: rawBalance, refetch: refetchBalance } = useReadContract({
     address: USDC_ADDRESS,
     abi: erc20Abi,
     functionName: 'balanceOf',
@@ -219,14 +221,7 @@ function SellFlowInner({ country, trader, onBack, onTradeCreated, onAddFunds, pr
           </div>
 
           {parsedUsdc > 0n && balance != null && !enoughFunds && (
-            <div className="mt-3 rounded-2xl p-3 flex items-center gap-3" style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)' }}>
-              <p className="flex-1 text-xs" style={{ color: '#92400e' }}>
-                Not enough in Funds. Selling uses your Funds balance — move USDC from your Wallet first.
-              </p>
-              <button onClick={onAddFunds} className="shrink-0 rounded-xl px-3 py-2 text-xs font-semibold text-white flex items-center gap-1" style={{ background: 'var(--accent)' }}>
-                <ArrowDownToLine className="size-3.5" /> Add to Funds
-              </button>
-            </div>
+            <TopUpFunds shortfall={Number(amount) - sellable} onDone={() => { void refetchBalance() }} onAddFunds={onAddFunds} />
           )}
 
           {parsedUsdc > 0n && amountValid && (
@@ -322,14 +317,7 @@ function SellFlowInner({ country, trader, onBack, onTradeCreated, onAddFunds, pr
           </div>
 
           {balance != null && !enoughFunds && (
-            <div className="mt-3 rounded-2xl p-3 flex items-center gap-3" style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)' }}>
-              <p className="flex-1 text-xs" style={{ color: '#92400e' }}>
-                Your Funds balance is {balance.toFixed(2)} USDC. Move at least {(Number(amount) - sellable).toFixed(2)} more USDC from your Wallet to Funds.
-              </p>
-              <button onClick={onAddFunds} className="shrink-0 rounded-xl px-3 py-2 text-xs font-semibold text-white flex items-center gap-1" style={{ background: 'var(--accent)' }}>
-                <ArrowDownToLine className="size-3.5" /> Add to Funds
-              </button>
-            </div>
+            <TopUpFunds shortfall={Number(amount) - sellable} onDone={() => { void refetchBalance() }} onAddFunds={onAddFunds} />
           )}
 
           {error && (
@@ -379,6 +367,56 @@ function Row({ label, value, bold, success }: { label: string; value: string; bo
       <span className={`text-sm tabular-nums text-right ${bold ? 'font-semibold' : ''}`} style={{ color: success ? 'var(--success)' : 'var(--ink)' }}>
         {value}
       </span>
+    </div>
+  )
+}
+
+/**
+ * Shown when the Funds balance is short. Moves the difference from the Wallet in
+ * one tap, so users don't have to think about Wallet vs Funds.
+ */
+function TopUpFunds({ shortfall, onDone, onAddFunds }: { shortfall: number; onDone: () => void; onAddFunds: () => void }) {
+  const { wallet } = useAppWallet()
+  const { balance: walletBalance, refresh } = useUsdcBalance(wallet?.address)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const need = Math.ceil(shortfall * 100) / 100 // round up to the cent
+  const canCover = walletBalance != null && maxSendable(walletBalance) >= need
+
+  async function move() {
+    if (!wallet) return
+    setBusy(true)
+    setErr('')
+    try {
+      const hash = await sendUsdcOnArc('wallet', wallet.fundsAddress, need.toFixed(6))
+      recordTx({ hash, chainId: ARC_TESTNET_CHAIN_ID, kind: 'to_funds', amount: String(need), counterparty: 'Funds' })
+      await waitForArcTx(hash)
+      updateTxStatus(hash, 'confirmed')
+      refresh()
+      onDone()
+    } catch (e) {
+      setErr(friendlyTxError(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="mt-3 rounded-2xl p-3" style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)' }}>
+      <div className="flex items-center gap-3">
+        <p className="flex-1 text-xs" style={{ color: '#92400e' }}>
+          {canCover
+            ? `You need ${need.toFixed(2)} more USDC in Funds. Move it from your Wallet?`
+            : `You need ${need.toFixed(2)} more USDC. Your Wallet doesn't have enough either — add USDC first.`}
+        </p>
+        <button onClick={canCover ? () => { void move() } : onAddFunds} disabled={busy}
+          className="shrink-0 rounded-xl px-3 py-2 text-xs font-semibold text-white flex items-center gap-1 disabled:opacity-60"
+          style={{ background: 'var(--accent)' }}>
+          {busy ? <Loader2 className="size-3.5 animate-spin" /> : <ArrowDownToLine className="size-3.5" />}
+          {busy ? 'Moving…' : canCover ? `Move ${need.toFixed(2)} USDC` : 'Add USDC'}
+        </button>
+      </div>
+      {err && <p className="text-xs mt-2" style={{ color: 'var(--danger)' }}>{err}</p>}
     </div>
   )
 }
