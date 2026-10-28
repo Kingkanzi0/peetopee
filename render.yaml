@@ -1,12 +1,19 @@
+# Peetopee on Render — ONE web service that serves the app and its API at the same address.
+# Deploy: Render dashboard → New → Blueprint → pick this repo.
 services:
   - type: web
-    name: peetopee-api
+    name: peetopee
     runtime: docker
     dockerfilePath: ./Dockerfile
-    plan: free
+    # The free plan can't keep files: every account, ID check and trade detail would be
+    # wiped whenever the service sleeps (after 15 idle minutes) or restarts. "starter" is
+    # the cheapest paid plan and can attach the disk below. To try it free anyway, change
+    # this to `free` and delete the `disk:` block — just expect data to reset.
+    plan: starter
+    healthCheckPath: /api/health
     envVars:
       - key: PORT
-        value: 7860
+        value: 10000
       - key: DB_PATH
         value: /app/data/peetopee.db
       # TESTNET SETTINGS — change both before real users join:

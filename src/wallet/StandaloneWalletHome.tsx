@@ -36,18 +36,12 @@ export function StandaloneWalletHome({ wallet, onDelete, onBack }: Props) {
   const [refreshKey, setRefreshKey] = useState(0)
   const { prices } = useTokenPrices()
 
-  // Fetch all balances
+  // Fetch all balances (all chains in parallel, so one slow network doesn't hold up the rest)
   const fetchAll = useCallback(async () => {
     setLoadingBalances(true)
-    const results: TokenBalance[] = []
-    for (const chain of STANDALONE_CHAINS) {
-      const tokens = CHAIN_TOKENS[chain.id] ?? []
-      for (const token of tokens) {
-        const bal = await fetchTokenBalance(wallet.address, chain.id, token, prices)
-        results.push(bal)
-      }
-    }
-    setBalances(results)
+    const jobs = STANDALONE_CHAINS.flatMap(chain =>
+      (CHAIN_TOKENS[chain.id] ?? []).map(token => fetchTokenBalance(wallet.address, chain.id, token, prices)))
+    setBalances(await Promise.all(jobs))
     setLoadingBalances(false)
   }, [wallet.address, prices])
 
@@ -55,6 +49,14 @@ export function StandaloneWalletHome({ wallet, onDelete, onBack }: Props) {
     const t = setTimeout(() => { void fetchAll() }, 0)
     return () => clearTimeout(t)
   }, [fetchAll, refreshKey])
+
+  // Keep balances fresh so incoming payments show up without a reload.
+  useEffect(() => {
+    const t = setInterval(() => setRefreshKey(k => k + 1), 15_000)
+    return () => clearInterval(t)
+  }, [])
+
+  const arcError = balances.some(b => b.chainId === 5042002 && b.error)
 
   const totalUsd = balances.reduce((sum, b) => sum + b.usdValue, 0)
 
@@ -121,6 +123,11 @@ export function StandaloneWalletHome({ wallet, onDelete, onBack }: Props) {
           </div>
         </div>
 
+        {arcError && (
+          <div className="text-xs mb-2 rounded-lg px-2 py-1 inline-block" style={{ background: 'rgba(255,255,255,0.15)' }}>
+            Couldn't reach the Arc network — balances may be out of date. Tap Live to retry.
+          </div>
+        )}
         <div className="text-4xl font-bold tracking-tight mb-1 display">
           {loadingBalances && totalUsd === 0
             ? <span className="opacity-40">$—</span>
@@ -306,7 +313,9 @@ function TokenBalanceRow({ balance: b, chainColor }: { balance: TokenBalance; ch
           <span className="text-sm font-medium" style={{ color: 'var(--ink)' }}>{b.symbol}</span>
           <span className="text-sm font-medium tabular-nums" style={{ color: 'var(--ink)' }}>${b.usdValue.toFixed(2)}</span>
         </div>
-        <span className="text-xs" style={{ color: 'var(--subtle)' }}>{parseFloat(b.balance).toFixed(b.symbol === 'USDC' ? 2 : 6)} {b.symbol}</span>
+        <span className="text-xs" style={{ color: b.error ? 'var(--danger)' : 'var(--subtle)' }}>
+          {b.error ? "Couldn't load — tap Live to retry" : `${parseFloat(b.balance).toFixed(b.symbol === 'USDC' ? 2 : 6)} ${b.symbol}`}
+        </span>
       </div>
     </div>
   )
