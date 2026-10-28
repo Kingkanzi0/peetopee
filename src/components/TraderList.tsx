@@ -1,5 +1,7 @@
+import { useEffect, useState } from 'react'
 import { useReadContract } from 'wagmi'
-import { Star, ShieldCheck, ArrowLeft, Zap, BadgePlus } from 'lucide-react'
+import { Star, ShieldCheck, ShieldAlert, ArrowLeft, Zap, BadgePlus } from 'lucide-react'
+import { apiVerifiedAddresses } from '../auth/ptpApi'
 import { PEETOPEE_ESCROW, ARC_TESTNET_CHAIN_ID, CountryDef, TraderProfile, formatRate, traderRating } from '../contracts/peetopee'
 import { Amount, usdcDecimalsFor } from '../onchain-money'
 
@@ -10,7 +12,9 @@ interface Props {
   onRegisterTrader?: () => void
 }
 
-function TraderCard({ address, onSelect }: { address: string; country: CountryDef; onSelect: (t: TraderProfile) => void }) {
+function TraderCard({ address, country, verified, onSelect }: {
+  address: string; country: CountryDef; verified: boolean | undefined; onSelect: (t: TraderProfile) => void
+}) {
   const { data: profile, isLoading } = useReadContract({
     ...PEETOPEE_ESCROW,
     functionName: 'getTraderProfile',
@@ -27,7 +31,8 @@ function TraderCard({ address, onSelect }: { address: string; country: CountryDe
   }
 
   const p = profile as TraderProfile | undefined
-  if (!p || !p.isActive) return null
+  // The contract keeps traders listed under countries they've moved away from; skip those.
+  if (!p || !p.isActive || p.countryCode !== country.code) return null
   const rating = traderRating(p)
   const minFmt = Amount.fromRaw(p.minOrderUsdc, usdcDecimalsFor(ARC_TESTNET_CHAIN_ID)).toFixed(0)
   const maxFmt = Amount.fromRaw(p.maxOrderUsdc, usdcDecimalsFor(ARC_TESTNET_CHAIN_ID)).toFixed(0)
@@ -35,8 +40,9 @@ function TraderCard({ address, onSelect }: { address: string; country: CountryDe
 
   return (
     <button
-      onClick={() => onSelect(p)}
-      className="w-full rounded-2xl p-4 text-left transition-all hover:scale-[1.01] active:scale-[0.99]"
+      onClick={() => verified && onSelect(p)}
+      disabled={!verified}
+      className="w-full rounded-2xl p-4 text-left transition-all hover:scale-[1.01] active:scale-[0.99] disabled:hover:scale-100 disabled:opacity-60"
       style={{
         background: 'var(--surface-strong)',
         border: '1px solid var(--border)',
@@ -54,8 +60,19 @@ function TraderCard({ address, onSelect }: { address: string; country: CountryDe
               {address.slice(0, 6)}...{address.slice(-4)}
             </div>
             <div className="flex items-center gap-1 mt-0.5">
-              <ShieldCheck className="size-3" style={{ color: 'var(--success)' }} />
-              <span className="text-xs" style={{ color: 'var(--success)' }}>Verified</span>
+              {verified === undefined ? (
+                <span className="text-xs" style={{ color: 'var(--subtle)' }}>Checking ID…</span>
+              ) : verified ? (
+                <>
+                  <ShieldCheck className="size-3" style={{ color: 'var(--success)' }} />
+                  <span className="text-xs" style={{ color: 'var(--success)' }}>ID verified</span>
+                </>
+              ) : (
+                <>
+                  <ShieldAlert className="size-3" style={{ color: 'var(--subtle)' }} />
+                  <span className="text-xs" style={{ color: 'var(--subtle)' }}>Not ID-verified · can't trade yet</span>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -121,6 +138,17 @@ export function TraderList({ country, onBack, onSelectTrader, onRegisterTrader }
   })
 
   const traderAddresses = (traders as string[] | undefined) ?? []
+  const [verified, setVerified] = useState<Record<string, boolean> | null>(null)
+  const addrKey = traderAddresses.join(',')
+
+  useEffect(() => {
+    if (!addrKey) return
+    let alive = true
+    apiVerifiedAddresses(addrKey.split(','))
+      .then(v => { if (alive) setVerified(v) })
+      .catch(() => { if (alive) setVerified({}) })
+    return () => { alive = false }
+  }, [addrKey])
 
   return (
     <div className="mx-auto max-w-lg px-4 py-4">
@@ -178,7 +206,8 @@ export function TraderList({ country, onBack, onSelectTrader, onRegisterTrader }
 
       <div className="space-y-3">
         {traderAddresses.map(addr => (
-          <TraderCard key={addr} address={addr} country={country} onSelect={onSelectTrader} />
+          <TraderCard key={addr} address={addr} country={country} onSelect={onSelectTrader}
+            verified={verified === null ? undefined : !!verified[addr.toLowerCase()]} />
         ))}
       </div>
 

@@ -10,9 +10,9 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Mail, Phone, ChevronRight, Search, CheckCircle2, RefreshCw } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
-import { sendOtp, verifyOtp, otpSecondsLeft } from '../auth/otpService'
+import { sendOtp, verifyOtp } from '../auth/otpService'
 import { AvatarPicker } from './AvatarPicker'
-import { COUNTRIES } from '../contracts/peetopee'
+import { COUNTRIES, getCountryByCode } from '../contracts/peetopee'
 import type { CountryDef } from '../contracts/peetopee'
 import { PeetopeeLogoSVG } from './PeetopeeLogoSVG'
 
@@ -48,6 +48,10 @@ export function OnboardingFlow() {
   const [demoCode, setDemoCode] = useState('')
   const [countdown, setCountdown] = useState(0)
   const [otpBusy, setOtpBusy] = useState(false)
+  const [sendBusy, setSendBusy] = useState(false)
+  const [sendError, setSendError] = useState('')
+  const [finishBusy, setFinishBusy] = useState(false)
+  const [finishError, setFinishError] = useState('')
 
   // Profile state
   const [name, setName] = useState('')
@@ -83,11 +87,19 @@ export function OnboardingFlow() {
   )
 
   // ── Step 1 → 2: send OTP ──────────────────────────────────────────────────
-  function handleSendOtp() {
-    if (!contactValid) return
-    const result = sendOtp(contactValue)
-    setDemoCode(result.demoCode)
-    setCountdown(otpSecondsLeft(contactValue))
+  async function handleSendOtp() {
+    if (!contactValid || sendBusy) return
+    setSendBusy(true)
+    setSendError('')
+    const result = await sendOtp(contactValue)
+    setSendBusy(false)
+    if (!result.ok) {
+      setSendError(result.error ?? 'Could not send the code.')
+      if (step === 'otp') setOtpError(result.error ?? '')
+      return
+    }
+    setDemoCode(result.demoCode ?? '')
+    setCountdown(30)
     setOtp('')
     setOtpError('')
     setStep('otp')
@@ -119,41 +131,68 @@ export function OnboardingFlow() {
     }
   }
 
-  const handleVerifyOtp = useCallback(() => {
+  const handleVerifyOtp = useCallback(async () => {
+    if (otpBusy) return
     setOtpBusy(true)
     setOtpError('')
-    setTimeout(() => {
-      const ok = verifyOtp(contactValue, otp)
-      setOtpBusy(false)
-      if (ok) {
-        setStep('profile')
-      } else {
-        setOtpError('Incorrect code. Please try again.')
-        setOtp('')
-        otpRefs.current[0]?.focus()
-      }
-    }, 600)
-  }, [contactValue, otp])
+    const res = await verifyOtp(contactValue, otp)
+    setOtpBusy(false)
+    if (!res.ok) {
+      setOtpError(res.error ?? 'Incorrect code. Please try again.')
+      setOtp('')
+      otpRefs.current[0]?.focus()
+      return
+    }
+    // Returning user on a new device: restore their Peetopee profile and skip setup.
+    const existing = res.profile
+    const existingCountry = existing ? getCountryByCode(existing.countryCode) : undefined
+    if (existing && existingCountry) {
+      try {
+        await signIn({
+          name: existing.displayName,
+          email: method === 'email' ? contactValue.toLowerCase() : '',
+          phone: method === 'phone' ? contactValue : undefined,
+          contactMethod: method,
+          avatarDataUrl: existing.avatarUrl || undefined,
+          country: existingCountry,
+          createdAt: Date.now(),
+        })
+        return
+      } catch { /* fall through to profile setup */ }
+    }
+    if (existing) {
+      setName(existing.displayName)
+      if (existing.avatarUrl) setAvatarDataUrl(existing.avatarUrl)
+    }
+    setStep('profile')
+  }, [contactValue, otp, otpBusy, method, signIn])
 
   // Auto-verify when 6 digits entered — defer to next tick to avoid setState-in-effect
   useEffect(() => {
     if (otp.length !== 6 || step !== 'otp') return
-    const t = setTimeout(handleVerifyOtp, 0)
+    const t = setTimeout(() => { void handleVerifyOtp() }, 0)
     return () => clearTimeout(t)
   }, [otp, step, handleVerifyOtp])
 
   // ── Step 4: finish ────────────────────────────────────────────────────────
-  function handleFinish() {
-    if (!selectedCountry) return
-    signIn({
-      name: name.trim(),
-      email: method === 'email' ? contactValue : '',
-      phone: method === 'phone' ? contactValue : undefined,
-      contactMethod: method,
-      avatarDataUrl,
-      country: selectedCountry,
-      createdAt: Date.now(),
-    })
+  async function handleFinish() {
+    if (!selectedCountry || finishBusy) return
+    setFinishBusy(true)
+    setFinishError('')
+    try {
+      await signIn({
+        name: name.trim(),
+        email: method === 'email' ? contactValue.toLowerCase() : '',
+        phone: method === 'phone' ? contactValue : undefined,
+        contactMethod: method,
+        avatarDataUrl,
+        country: selectedCountry,
+        createdAt: Date.now(),
+      })
+    } catch (e) {
+      setFinishError(e instanceof Error ? e.message : 'Could not create your account.')
+      setFinishBusy(false)
+    }
   }
 
   return (
@@ -251,18 +290,21 @@ export function OnboardingFlow() {
                   </p>
                 )}
                 <p className="text-xs mt-2 px-1" style={{ color: 'var(--subtle)' }}>
-                  Stored on your device only. Never shared or used for marketing.
+                  Used only to sign you in. Never shared or used for marketing.
                 </p>
+                {sendError && (
+                  <p className="text-xs mt-2 ml-1" style={{ color: 'var(--danger)' }}>{sendError}</p>
+                )}
               </div>
 
               <div className="mt-auto pt-8">
                 <button
-                  onClick={handleSendOtp}
-                  disabled={!contactValid}
+                  onClick={() => { void handleSendOtp() }}
+                  disabled={!contactValid || sendBusy}
                   className="w-full rounded-2xl py-4 text-sm font-bold text-white flex items-center justify-center gap-2 disabled:opacity-40 active:scale-[0.98] transition-all"
                   style={{ background: 'var(--accent)' }}
                 >
-                  Send code
+                  {sendBusy ? 'Sending…' : 'Send code'}
                   <ChevronRight className="size-4" />
                 </button>
               </div>
@@ -291,7 +333,7 @@ export function OnboardingFlow() {
                   style={{ background: 'rgba(108,63,197,0.08)', border: '1px solid rgba(108,63,197,0.2)' }}
                 >
                   <span className="text-xs" style={{ color: 'var(--muted)' }}>
-                    Demo code (not a real SMS/email):
+                    Test server code (not emailed):
                   </span>
                   <span className="font-mono text-base font-bold tracking-widest" style={{ color: '#6c3fc5' }}>
                     {demoCode}
@@ -338,7 +380,8 @@ export function OnboardingFlow() {
                   </p>
                 ) : (
                   <button
-                    onClick={handleSendOtp}
+                    onClick={() => { void handleSendOtp() }}
+                    disabled={sendBusy}
                     className="text-xs flex items-center gap-1"
                     style={{ color: 'var(--accent)' }}
                   >
@@ -350,7 +393,7 @@ export function OnboardingFlow() {
 
               <div className="mt-auto pt-8">
                 <button
-                  onClick={handleVerifyOtp}
+                  onClick={() => { void handleVerifyOtp() }}
                   disabled={otp.length < 6 || otpBusy}
                   className="w-full rounded-2xl py-4 text-sm font-bold text-white flex items-center justify-center gap-2 disabled:opacity-40 active:scale-[0.98] transition-all"
                   style={{ background: 'var(--accent)' }}
@@ -493,13 +536,16 @@ export function OnboardingFlow() {
                   paddingBottom: 'calc(1rem + env(safe-area-inset-bottom, 0px))',
                 }}
               >
+                {finishError && (
+                  <p className="text-xs text-center mb-2" style={{ color: 'var(--danger)' }}>{finishError}</p>
+                )}
                 <button
-                  onClick={handleFinish}
-                  disabled={!selectedCountry}
+                  onClick={() => { void handleFinish() }}
+                  disabled={!selectedCountry || finishBusy}
                   className="w-full max-w-md mx-auto rounded-2xl py-4 text-sm font-bold text-white flex items-center justify-center gap-2 disabled:opacity-40 active:scale-[0.98] transition-all"
                   style={{ background: 'var(--accent)', display: 'flex' }}
                 >
-                  Get started
+                  {finishBusy ? 'Setting up…' : 'Get started'}
                   <ChevronRight className="size-4" />
                 </button>
               </div>

@@ -9,6 +9,7 @@ import {
   Trade,
 } from '../contracts/peetopee'
 import { Amount, usdcDecimalsFor } from '../onchain-money'
+import { TradeBankDetails } from './TradeBankDetails'
 
 interface Props {
   tradeId: bigint
@@ -184,6 +185,11 @@ export function TradeStatusScreen({ tradeId, onBack }: Props) {
             Trader has {hoursLeft}h {minsLeft}m to mark fiat sent
           </span>
         </div>
+      )}
+
+      {/* Bank details — only the seller and trader can see them */}
+      {(isSeller || isTrader) && (status === TS.Created || status === TS.FiatSent || status === TS.Disputed) && (
+        <TradeBankDetails tradeId={tradeId} role={isTrader ? 'trader' : 'seller'} />
       )}
 
       {/* Actions */}

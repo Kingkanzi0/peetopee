@@ -1,4 +1,5 @@
-import artifact from '../../contracts/out/PeetopeeEscrow.sol/PeetopeeEscrow.json'
+// ABI of the deployed contract (committed), so the app builds without running Foundry first.
+import artifact from '../../contracts/contract-metadata/PeetopeeEscrow.json'
 
 export const PEETOPEE_ESCROW_ADDRESS = '0x59417b13a4d545ff514642a1db1693f35652daea' as const
 

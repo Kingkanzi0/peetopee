@@ -1,12 +1,6 @@
-import { useState, useEffect } from 'react'
 import { PeetopeeLogoSVG } from './PeetopeeLogoSVG'
 import { useAuth } from '../auth/AuthContext'
-import { loadStoredWallet } from '../wallet/standaloneWallet'
-import { getPublicClient } from '../wallet/standaloneWallet'
-import { erc20Abi } from 'viem'
-
-const USDC_ADDRESS = '0x3600000000000000000000000000000000000000' as const
-const ARC_CHAIN_ID = 5042002
+import { useAppWallet, useUsdcBalance } from '../wallet/appWallet'
 
 function getInitials(name: string) {
   return name.trim().split(/\s+/).slice(0, 2).map(w => w[0]?.toUpperCase() ?? '').join('')
@@ -18,23 +12,12 @@ interface WalletBarProps {
 
 export function WalletBar({ onProfileOpen }: WalletBarProps) {
   const { profile } = useAuth()
-  const [balance, setBalance] = useState<string | null>(null)
-  const storedWallet = loadStoredWallet()
-  const address = storedWallet?.address ?? null
-
-  useEffect(() => {
-    if (!address) return
-    const client = getPublicClient(ARC_CHAIN_ID)
-    void client.readContract({
-      address: USDC_ADDRESS,
-      abi: erc20Abi,
-      functionName: 'balanceOf',
-      args: [address],
-    }).then((raw) => {
-      const val = Number(raw) / 1e6
-      setBalance(val.toFixed(2))
-    }).catch(() => setBalance(null))
-  }, [address])
+  const { wallet } = useAppWallet()
+  const address = wallet?.address ?? null
+  // Wallet + Funds, refreshed every 15 seconds.
+  const main = useUsdcBalance(wallet?.address)
+  const funds = useUsdcBalance(wallet && wallet.fundsAddress !== wallet.address ? wallet.fundsAddress : null)
+  const balance = main.balance == null ? null : (main.balance + (funds.balance ?? 0)).toFixed(2)
 
   const shortAddr = address ? `${address.slice(0, 6)}…${address.slice(-4)}` : null
 

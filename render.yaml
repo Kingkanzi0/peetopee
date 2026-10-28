@@ -1,14 +1,37 @@
+# Peetopee on Render — ONE web service that serves the app and its API at the same address.
+# Deploy: Render dashboard → New → Blueprint → pick this repo.
 services:
   - type: web
-    name: peetopee-api
+    name: peetopee
     runtime: docker
     dockerfilePath: ./Dockerfile
-    plan: free
+    # The free plan can't keep files: every account, ID check and trade detail would be
+    # wiped whenever the service sleeps (after 15 idle minutes) or restarts. "starter" is
+    # the cheapest paid plan and can attach the disk below. To try it free anyway, change
+    # this to `free` and delete the `disk:` block — just expect data to reset.
+    plan: starter
+    healthCheckPath: /api/health
     envVars:
       - key: PORT
-        value: 7860
+        value: 10000
       - key: DB_PATH
         value: /app/data/peetopee.db
+      # TESTNET SETTINGS — change both before real users join:
+      #  OTP_DEMO=1 shows the sign-in code in the app instead of emailing it.
+      #  Set RESEND_API_KEY (and OTP_FROM_EMAIL) and remove OTP_DEMO to email real codes.
+      - key: OTP_DEMO
+        value: "1"
+      #  KYC_AUTO_APPROVE=1 approves every ID submission automatically.
+      #  Remove it to review submissions yourself on the admin page (#admin).
+      - key: KYC_AUTO_APPROVE
+        value: "1"
+      - key: RESEND_API_KEY
+        sync: false
+      - key: OTP_FROM_EMAIL
+        sync: false
+      # Secret for the ID review page. Render generates it; copy it from the dashboard.
+      - key: ADMIN_TOKEN
+        generateValue: true
     disk:
       name: peetopee-data
       mountPath: /app/data
