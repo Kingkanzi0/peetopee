@@ -34,7 +34,22 @@ import { keccak_256 } from '@noble/hashes/sha3.js'
 // ── constants ───────────────────────────────────────────────────────────────
 
 export const ARC_CHAIN_ID = 5042002
-const DEFAULT_RPC = 'https://rpc.testnet.arc.io'
+const DEFAULT_RPCS = [
+  'https://rpc.testnet.arc.io',
+  'https://rpc.blockdaemon.testnet.arc.io',
+  'https://rpc.drpc.testnet.arc.io',
+  'https://rpc.quicknode.testnet.arc.io',
+]
+
+/** Read-only and broadcast methods the app needs; everything else is refused by the /rpc relay. */
+const RELAY_METHODS = new Set([
+  'eth_chainId', 'net_version', 'eth_blockNumber', 'eth_getBlockByNumber', 'eth_getBlockByHash',
+  'eth_call', 'eth_estimateGas', 'eth_gasPrice', 'eth_maxPriorityFeePerGas', 'eth_feeHistory',
+  'eth_getBalance', 'eth_getCode', 'eth_getTransactionCount', 'eth_getTransactionByHash',
+  'eth_getTransactionReceipt', 'eth_sendRawTransaction', 'eth_getLogs',
+])
+const RELAY_MAX_BATCH = 20
+const EXPLORER_API = 'https://explorer.testnet.arc.io/api/v2'
 const DEFAULT_ESCROW = '0x59417b13a4d545ff514642a1db1693f35652daea'
 
 const OTP_TTL_MS = 10 * 60_000
@@ -173,16 +188,33 @@ export function decodeGetTrade(hex: string): OnchainTrade | null {
   return { tradeId, seller, trader, status, bankDetails: dec.decode(hexToBytes(strHex)) }
 }
 
-function httpRpc(url: string): RpcFn {
+/** A JSON-RPC error returned by the node (e.g. a contract revert). Passed through as-is. */
+export class RpcError extends Error {
+  constructor(public code: number, message: string, public data?: unknown) { super(message) }
+}
+
+/** Calls the first endpoint that answers; moves to the next on network errors or timeouts. */
+export function httpRpc(urls: string[]): RpcFn {
   return async (method, params) => {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-    })
-    const body = await res.json() as { result?: unknown; error?: { message: string } }
-    if (body.error) throw new Error(body.error.message)
-    return body.result
+    let lastErr: unknown
+    for (const url of urls) {
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+          signal: AbortSignal.timeout(10_000),
+        })
+        if (res.status >= 500 || res.status === 429) throw new Error(`RPC ${res.status}`)
+        const body = await res.json() as { result?: unknown; error?: { code?: number; message: string; data?: unknown } }
+        if (body.error) throw new RpcError(body.error.code ?? -32000, body.error.message, body.error.data)
+        return body.result
+      } catch (e) {
+        if (e instanceof RpcError) throw e
+        lastErr = e
+      }
+    }
+    throw lastErr instanceof Error ? lastErr : new Error('All Arc RPC endpoints failed')
   }
 }
 
@@ -218,6 +250,8 @@ export interface ApiOptions {
   adminToken?: string
   escrowAddress?: string
   now?: () => number
+  /** For tests: replaces the call to the Arc explorer. */
+  fetchExplorer?: (url: string) => Promise<unknown>
 }
 
 type Json = Record<string, unknown>
@@ -248,7 +282,7 @@ export function optionsFromEnv(db: Database, dbPath?: string): ApiOptions {
   return {
     db,
     dbPath,
-    rpc: httpRpc(env.ARC_RPC_URL || DEFAULT_RPC),
+    rpc: httpRpc(env.ARC_RPC_URL ? [env.ARC_RPC_URL, ...DEFAULT_RPCS] : DEFAULT_RPCS),
     sendCode: env.RESEND_API_KEY
       ? resendSender(env.RESEND_API_KEY, env.OTP_FROM_EMAIL || 'Peetopee <onboarding@resend.dev>')
       : null,
@@ -644,6 +678,51 @@ export function createApi(opts: ApiOptions) {
     return { ok: true }
   }
 
+  /**
+   * JSON-RPC relay to Arc. Browsers' ad/tracker blockers (e.g. Brave Shields) often
+   * block direct calls to public RPC hosts; calls to the app's own server get through.
+   */
+  async function rpcRelay(req: Request, ip: string): Promise<Response> {
+    if (!opts.rpc) return json({ jsonrpc: '2.0', id: null, error: { code: -32603, message: 'Chain access is not configured.' } }, 503)
+    rateLimitIp(`rpc:${ip}`, 600, 60_000)
+    let body: unknown
+    try { body = await req.json() } catch { return json({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } }, 400) }
+    const batch = Array.isArray(body)
+    const calls = (batch ? body : [body]) as { id?: unknown; method?: unknown; params?: unknown }[]
+    if (calls.length === 0 || calls.length > RELAY_MAX_BATCH) {
+      return json({ jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Invalid batch size' } }, 400)
+    }
+    const answers = await Promise.all(calls.map(async c => {
+      const id = c?.id ?? null
+      const method = typeof c?.method === 'string' ? c.method : ''
+      if (!RELAY_METHODS.has(method)) return { jsonrpc: '2.0', id, error: { code: -32601, message: `Method not allowed: ${method}` } }
+      try {
+        return { jsonrpc: '2.0', id, result: await opts.rpc!(method, Array.isArray(c.params) ? c.params : []) }
+      } catch (e) {
+        if (e instanceof RpcError) return { jsonrpc: '2.0', id, error: { code: e.code, message: e.message, ...(e.data !== undefined ? { data: e.data } : {}) } }
+        return { jsonrpc: '2.0', id, error: { code: -32603, message: 'Arc network unavailable, please retry.' } }
+      }
+    }))
+    return json(batch ? answers : answers[0])
+  }
+
+  /** USDC transfer history for an address, via the Arc explorer (relayed for the same reason as /rpc). */
+  async function historyRelay(address: string, ip: string) {
+    if (!ADDRESS_RE.test(address)) throw new HttpError(400, 'Invalid address.')
+    rateLimitIp(`history:${ip}`, 60, 60_000)
+    const fetcher = opts.fetchExplorer ?? (async (url: string) => {
+      const res = await fetch(url, { signal: AbortSignal.timeout(10_000) })
+      if (!res.ok) throw new Error(`explorer ${res.status}`)
+      return res.json()
+    })
+    try {
+      const body = await fetcher(`${EXPLORER_API}/addresses/${address}/token-transfers?type=ERC-20`) as { items?: unknown[] }
+      return { ok: true, items: Array.isArray(body?.items) ? body.items : [] }
+    } catch {
+      throw new HttpError(502, 'The Arc explorer is unavailable right now.')
+    }
+  }
+
   // ── router ────────────────────────────────────────────────────────────────
 
   async function readBody(req: Request): Promise<Json> {
@@ -662,6 +741,8 @@ export function createApi(opts: ApiOptions) {
     const m = req.method
     try {
       if (route === '/health') return json({ ok: true, ts: now() })
+      if (m === 'POST' && route === '/rpc') return await rpcRelay(req, ip)
+      if (m === 'GET' && route === '/history') return json(await historyRelay(url.searchParams.get('address') ?? '', ip))
 
       if (m === 'POST' && route === '/auth/request-otp') return json(await requestOtp(await readBody(req), ip))
       if (m === 'POST' && route === '/auth/verify-otp') return json(verifyOtp(await readBody(req)))

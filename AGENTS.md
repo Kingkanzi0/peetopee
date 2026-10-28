@@ -51,6 +51,9 @@ Peetopee is a peer-to-peer marketplace where sellers lock USDC in escrow and loc
 7. **ID verification (KYC) is required** to sell (`SellFlow`) or register as a trader (`TraderDashboard`).
    Review submissions at `<app-url>#admin` with the server's `ADMIN_TOKEN`.
 8. Don't commit `console.jsonl` / `traces.jsonl` (debug logs can contain emails and codes).
+9. **Arc network access goes through the server first.** The app reads/sends via `/api/rpc` (an allowlisted
+   JSON-RPC relay) and history via `/api/history`, falling back to the public endpoints in
+   `src/wallet/arcNetwork.ts`. Browser blockers like Brave Shields block public RPC hosts, not the app's own server.
 
 ## Server environment variables
 

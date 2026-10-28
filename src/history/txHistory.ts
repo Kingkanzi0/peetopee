@@ -99,6 +99,16 @@ function formatUnits6(raw: string, decimals: number) {
 }
 
 async function explorerTransfers(address: string, signal?: AbortSignal): Promise<BlockscoutTransfer[]> {
+  // Through the Peetopee server first (browser blockers often block the explorer), then directly.
+  try {
+    const res = await fetch(`/api/history?address=${address}`, { signal })
+    if (res.ok) {
+      const body = await res.json() as { items?: BlockscoutTransfer[] }
+      if (Array.isArray(body.items)) return body.items
+    }
+  } catch (e) {
+    if (signal?.aborted) throw e
+  }
   const res = await fetch(`${EXPLORER_API}/addresses/${address}/token-transfers?type=ERC-20`, { signal })
   if (!res.ok) throw new Error(`explorer ${res.status}`)
   const body = await res.json() as { items?: BlockscoutTransfer[] }

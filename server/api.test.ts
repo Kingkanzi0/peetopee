@@ -370,3 +370,84 @@ describe('migration from the old production database', () => {
     expect(row?.verified).toBe(0)
   })
 })
+
+describe('Arc RPC relay', () => {
+  async function relay(body: unknown) {
+    const req = new Request('http://test/rpc', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    const res = await api.handle(req, '/rpc', '9.9.9.9')
+    return { status: res.status, body: await res.json() as any }
+  }
+
+  test('forwards allowed calls and keeps the request id', async () => {
+    chainTrades.set(3n, encodeTrade({ id: 3n, seller: alice.address, trader: bob.address, bankDetails: 'x' }))
+    const data = '0x' + keccakHex('getTrade(uint256)').slice(2, 10) + (3).toString(16).padStart(64, '0')
+    const r = await relay({ jsonrpc: '2.0', id: 42, method: 'eth_call', params: [{ to: '0x59417b13a4d545ff514642a1db1693f35652daea', data }, 'latest'] })
+    expect(r.status).toBe(200)
+    expect(r.body.id).toBe(42)
+    expect(decodeGetTrade(r.body.result)!.tradeId).toBe(3n)
+  })
+
+  test('refuses methods outside the allowlist, per item in a batch', async () => {
+    const r = await relay([
+      { jsonrpc: '2.0', id: 1, method: 'eth_accounts', params: [] },
+      { jsonrpc: '2.0', id: 2, method: 'debug_traceTransaction', params: [] },
+    ])
+    expect(r.body).toHaveLength(2)
+    expect(r.body[0].error.code).toBe(-32601)
+    expect(r.body[1].error.code).toBe(-32601)
+  })
+
+  test('passes node errors (like reverts) through with code and data', async () => {
+    const { RpcError } = await import('./api')
+    setup({ rpc: async () => { throw new RpcError(3, 'execution reverted', '0x08c379a0') } })
+    const r = await relay({ jsonrpc: '2.0', id: 7, method: 'eth_call', params: [] })
+    expect(r.body.error).toEqual({ code: 3, message: 'execution reverted', data: '0x08c379a0' })
+  })
+
+  test('rejects oversized batches', async () => {
+    const r = await relay(Array.from({ length: 21 }, (_, i) => ({ jsonrpc: '2.0', id: i, method: 'eth_chainId', params: [] })))
+    expect(r.status).toBe(400)
+  })
+})
+
+describe('RPC endpoint fallback', () => {
+  test('skips a failing endpoint and passes node errors through without retrying', async () => {
+    const { httpRpc, RpcError } = await import('./api')
+    let hitsDown = 0, hitsUp = 0
+    const down = Bun.serve({ port: 0, fetch() { hitsDown++; return new Response('bad gateway', { status: 502 }) } })
+    const up = Bun.serve({
+      port: 0,
+      async fetch(req) {
+        hitsUp++
+        const { method } = await req.json() as { method: string }
+        if (method === 'eth_call') return Response.json({ jsonrpc: '2.0', id: 1, error: { code: 3, message: 'execution reverted' } })
+        return Response.json({ jsonrpc: '2.0', id: 1, result: '0x4cef52' })
+      },
+    })
+    try {
+      const rpc = httpRpc([`http://localhost:${down.port}`, `http://localhost:${up.port}`])
+      expect(await rpc('eth_chainId', [])).toBe('0x4cef52')
+      expect(hitsDown).toBe(1)
+      await expect(rpc('eth_call', [])).rejects.toBeInstanceOf(RpcError)
+      expect(hitsUp).toBe(2)
+    } finally {
+      down.stop(true); up.stop(true)
+    }
+  })
+})
+
+describe('history relay', () => {
+  test('returns explorer transfers for a valid address', async () => {
+    let asked = ''
+    setup({ fetchExplorer: async url => { asked = url; return { items: [{ transaction_hash: '0xabc' }] } } })
+    const r = await call('GET', `/history?address=${alice.address}`)
+    expect(r.body.items).toEqual([{ transaction_hash: '0xabc' }])
+    expect(asked).toContain(`/addresses/${alice.address}/token-transfers`)
+  })
+
+  test('rejects bad addresses and reports explorer outages', async () => {
+    expect((await call('GET', '/history?address=nope')).status).toBe(400)
+    setup({ fetchExplorer: async () => { throw new Error('down') } })
+    expect((await call('GET', `/history?address=${alice.address}`)).status).toBe(502)
+  })
+})
