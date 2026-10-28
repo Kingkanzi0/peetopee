@@ -451,3 +451,49 @@ describe('history relay', () => {
     expect((await call('GET', `/history?address=${alice.address}`)).status).toBe(502)
   })
 })
+
+describe('dispute evidence', () => {
+  const photo = 'data:image/jpeg;base64,' + 'C'.repeat(500)
+
+  async function disputedTrade() {
+    const seller = await signUp('a@b.co', 'Alice', '@alice')
+    await link(seller.token, seller.ptpId, aliceFunds, 'funds')
+    const trader = await signUp('b@b.co', 'Bob', '@bob')
+    await link(trader.token, trader.ptpId, bob, 'funds')
+    const stranger = await signUp('m@b.co', 'Mallory', '@mallory')
+    await link(stranger.token, stranger.ptpId, mallory, 'funds')
+    const details = 'OPay · 0123456789 · Alice A'
+    chainTrades.set(9n, encodeTrade({ id: 9n, seller: aliceFunds.address, trader: bob.address, bankDetails: keccakHex(details), status: 3 }))
+    await call('POST', '/trade-details', { tradeId: '9', details }, auth(seller.token))
+    return { seller, trader, stranger, details }
+  }
+
+  test('both sides can add and read evidence; strangers cannot', async () => {
+    const { seller, trader, stranger } = await disputedTrade()
+    expect((await call('POST', '/trade-evidence', { tradeId: '9', text: 'No money arrived' }, auth(seller.token))).status).toBe(200)
+    expect((await call('POST', '/trade-evidence', { tradeId: '9', text: 'Receipt attached', image: photo }, auth(trader.token))).status).toBe(200)
+    expect((await call('POST', '/trade-evidence', { tradeId: '9', text: 'hi' }, auth(stranger.token))).status).toBe(403)
+    const list = await call('GET', '/trade-evidence?tradeId=9', undefined, auth(trader.token))
+    expect(list.body.evidence.map((e: any) => e.role)).toEqual(['seller', 'trader'])
+    expect(list.body.evidence[1].image).toBe(photo)
+    expect((await call('GET', '/trade-evidence?tradeId=9', undefined, auth(stranger.token))).status).toBe(403)
+  })
+
+  test('rejects empty evidence and non-image uploads', async () => {
+    const { seller } = await disputedTrade()
+    expect((await call('POST', '/trade-evidence', { tradeId: '9' }, auth(seller.token))).status).toBe(400)
+    expect((await call('POST', '/trade-evidence', { tradeId: '9', image: 'hello' }, auth(seller.token))).status).toBe(400)
+  })
+
+  test('admin sees both people, the bank details and all evidence', async () => {
+    const { seller, trader, details } = await disputedTrade()
+    await call('POST', '/trade-evidence', { tradeId: '9', text: 'No money arrived' }, auth(seller.token))
+    await call('POST', '/trade-evidence', { tradeId: '9', image: photo }, auth(trader.token))
+    expect((await call('GET', '/admin/dispute?tradeId=9')).status).toBe(403)
+    const r = await call('GET', '/admin/dispute?tradeId=9', undefined, { 'X-Admin-Token': 'admin-secret' })
+    expect(r.body.seller.ptpId).toBe('@alice')
+    expect(r.body.trader.ptpId).toBe('@bob')
+    expect(r.body.bankDetails).toBe(details)
+    expect(r.body.evidence).toHaveLength(2)
+  })
+})

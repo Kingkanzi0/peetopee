@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { ShieldCheck, Loader2, Check, X, ArrowLeft } from 'lucide-react'
 import { adminApi, ApiError, type KycStatus, type KycSubmission } from '../auth/ptpApi'
+import { AdminDisputes } from './AdminDisputes'
 
 export function AdminKyc({ onExit }: { onExit: () => void }) {
   const [token, setToken] = useState('')
@@ -15,6 +16,7 @@ export function AdminKyc({ onExit }: { onExit: () => void }) {
   const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [section, setSection] = useState<'ids' | 'disputes'>('ids')
 
   const load = useCallback(async () => {
     setBusy(true)
@@ -61,9 +63,9 @@ export function AdminKyc({ onExit }: { onExit: () => void }) {
           <ArrowLeft className="size-4" /> Back to app
         </button>
         <h1 className="text-2xl font-bold display mb-1 flex items-center gap-2" style={{ color: 'var(--ink)' }}>
-          <ShieldCheck className="size-6" /> ID review
+          <ShieldCheck className="size-6" /> Peetopee admin
         </h1>
-        <p className="text-sm mb-5" style={{ color: 'var(--muted)' }}>Approve or reject ID submissions from traders and sellers.</p>
+        <p className="text-sm mb-5" style={{ color: 'var(--muted)' }}>Review ID submissions and decide disputed trades.</p>
 
         {!authed ? (
           <div className="max-w-sm space-y-3">
@@ -75,6 +77,11 @@ export function AdminKyc({ onExit }: { onExit: () => void }) {
               {busy ? 'Checking…' : 'Open'}
             </button>
             {error && <p className="text-xs" style={{ color: 'var(--danger)' }}>{error}</p>}
+          </div>
+        ) : section === 'disputes' ? (
+          <div>
+            <SectionTabs section={section} setSection={setSection} />
+            <AdminDisputes adminToken={token} />
           </div>
         ) : open ? (
           <div className="space-y-4">
@@ -109,6 +116,7 @@ export function AdminKyc({ onExit }: { onExit: () => void }) {
           </div>
         ) : (
           <div>
+            <SectionTabs section={section} setSection={setSection} />
             <div className="flex gap-1 mb-4 rounded-xl p-1 w-fit" style={{ background: 'var(--surface-muted)' }}>
               {(['pending', 'approved', 'rejected'] as KycStatus[]).map(s => (
                 <button key={s} onClick={() => setStatus(s)} className="rounded-lg px-3 py-1.5 text-sm font-semibold capitalize"
@@ -136,6 +144,19 @@ export function AdminKyc({ onExit }: { onExit: () => void }) {
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+function SectionTabs({ section, setSection }: { section: 'ids' | 'disputes'; setSection: (s: 'ids' | 'disputes') => void }) {
+  return (
+    <div className="flex gap-2 mb-5">
+      {([['ids', 'ID review'], ['disputes', 'Disputes']] as const).map(([k, label]) => (
+        <button key={k} onClick={() => setSection(k)} className="rounded-xl px-4 py-2 text-sm font-semibold"
+          style={{ background: section === k ? 'var(--accent)' : 'var(--surface-muted)', color: section === k ? 'white' : 'var(--ink)' }}>
+          {label}
+        </button>
+      ))}
     </div>
   )
 }

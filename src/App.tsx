@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react'
-import { useAccount, useConnect, useConnectors } from 'wagmi'
+import { useAccount } from 'wagmi'
 import { ShoppingBag, LayoutDashboard, Wallet, Banknote, Send } from 'lucide-react'
 import { WalletBar } from './components/WalletBar'
 import { TraderList } from './components/TraderList'
@@ -23,9 +23,8 @@ import type { CountryDef, TraderProfile } from './contracts/peetopee'
 import { AdminKyc } from './components/AdminKyc'
 import { PayBankScreen } from './components/PayBankScreen'
 import { useVisitingCountry } from './hooks/useMoney'
-import { useAppWallet } from './wallet/appWallet'
-import { unlockWallet, lockWallet } from './wallet/standaloneWallet'
-import { PEETOPEE_CONNECTOR_ID } from './wallet/peetopeeConnector'
+import { lockWallet } from './wallet/standaloneWallet'
+import { useWalletSession } from './wallet/useWalletSession'
 
 type Screen =
   | { id: 'market' }
@@ -51,7 +50,13 @@ export default function App() {
   // Forget the decrypted wallet key when the user signs out.
   useEffect(() => { if (!profile) lockWallet() }, [profile])
 
-  if (admin) return <AdminKyc onExit={() => { window.location.hash = ''; setAdmin(false) }} />
+  const exitAdmin = () => { window.location.hash = ''; setAdmin(false) }
+  if (admin) {
+    // ID review only needs the admin token. Deciding disputes also needs your unlocked wallet.
+    return profile
+      ? <PinGate userName={profile.name}><AdminWithWallet onExit={exitAdmin} /></PinGate>
+      : <AdminKyc onExit={exitAdmin} />
+  }
   if (!splashDone) return <SplashScreen onDone={onSplashDone} />
   if (!profile) return <OnboardingFlow />
 
@@ -62,22 +67,19 @@ export default function App() {
   )
 }
 
+function AdminWithWallet({ onExit }: { onExit: () => void }) {
+  useWalletSession()
+  return <AdminKyc onExit={onExit} />
+}
+
 /** Everything after the PIN/biometric unlock. */
 function MainApp() {
-  const { address, isConnected } = useAccount()
-  const { connect } = useConnect()
-  const connectors = useConnectors()
-  const { wallet, unlocked } = useAppWallet()
+  const { address } = useAccount()
   const [visiting] = useVisitingCountry()
 
-  // Unlock the built-in wallet now that the user has passed the PIN gate…
-  useEffect(() => { void unlockWallet() }, [])
-  // …and use it (its Funds account) for all Market and Trader actions.
-  useEffect(() => {
-    if (!wallet || !unlocked || isConnected) return
-    const connector = connectors.find(c => c.id === PEETOPEE_CONNECTOR_ID)
-    if (connector) connect({ connector })
-  }, [wallet, unlocked, isConnected, connectors, connect])
+  // Unlock the built-in wallet now that the user has passed the PIN gate, and
+  // use its Funds account for all Market and Trader actions.
+  useWalletSession()
 
   const [showProfile, setShowProfile] = useState(false)
   const [tab, setTab] = useState<Tab>('market')

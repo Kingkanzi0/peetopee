@@ -10,6 +10,7 @@ import {
 } from '../contracts/peetopee'
 import { Amount, usdcDecimalsFor } from '../onchain-money'
 import { TradeBankDetails } from './TradeBankDetails'
+import { DisputeEvidence } from './DisputeEvidence'
 
 interface Props {
   tradeId: bigint
@@ -185,6 +186,11 @@ export function TradeStatusScreen({ tradeId, onBack }: Props) {
             Trader has {hoursLeft}h {minsLeft}m to mark fiat sent
           </span>
         </div>
+      )}
+
+      {/* Dispute evidence — both sides make their case to the admin */}
+      {(isSeller || isTrader) && isDisputed && (
+        <DisputeEvidence tradeId={tradeId} role={isTrader ? 'trader' : 'seller'} />
       )}
 
       {/* Bank details — only the seller and trader can see them */}

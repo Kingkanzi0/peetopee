@@ -351,6 +351,15 @@ export function migrate(db: Database) {
       details      TEXT NOT NULL,              -- encrypted
       created_at   INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS trade_evidence (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      trade_id   TEXT NOT NULL,
+      role       TEXT NOT NULL,                -- seller | trader
+      author     TEXT NOT NULL,                -- contact of the person who added it
+      body       TEXT NOT NULL,                -- encrypted JSON { text, image }
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS trade_evidence_trade ON trade_evidence(trade_id);
   `)
 
   // Carry over wallets from the old unauthenticated table as UNVERIFIED.
@@ -654,6 +663,76 @@ export function createApi(opts: ApiOptions) {
     return { ok: true, details: decrypt(dataKey, row.details) }
   }
 
+  // ── dispute evidence ──────────────────────────────────────────────────────
+
+  const MAX_EVIDENCE_TEXT = 1_000
+  const MAX_EVIDENCE_PER_TRADE = 20
+
+  /** Which side of the trade this account is on, or null. */
+  function roleIn(contact: string, trade: OnchainTrade): 'seller' | 'trader' | null {
+    const mine = verifiedAddressesOf(contact)
+    if (mine.has(trade.seller.toLowerCase())) return 'seller'
+    if (mine.has(trade.trader.toLowerCase())) return 'trader'
+    return null
+  }
+
+  function evidenceFor(tradeId: bigint) {
+    return db.query<{ id: number; role: string; body: string; created_at: number }, string>(
+      'SELECT id, role, body, created_at FROM trade_evidence WHERE trade_id = ? ORDER BY created_at ASC').all(tradeId.toString())
+      .map(r => ({ id: r.id, role: r.role, createdAt: r.created_at, ...(JSON.parse(decrypt(dataKey, r.body)) as { text: string; image?: string }) }))
+  }
+
+  async function addEvidence(contact: string, body: Json) {
+    let tradeId: bigint
+    try { tradeId = BigInt(String(body.tradeId)) } catch { throw new HttpError(400, 'Invalid trade.') }
+    const text = String(body.text ?? '').trim().slice(0, MAX_EVIDENCE_TEXT)
+    const image = body.image ? String(body.image) : ''
+    if (!text && !image) throw new HttpError(400, 'Add a message or a photo.')
+    if (image && (!image.startsWith('data:image/') || image.length > MAX_ID_IMAGE_CHARS)) {
+      throw new HttpError(400, 'The photo must be an image under 3 MB.')
+    }
+    const trade = await readTrade(tradeId)
+    if (!trade) throw new HttpError(404, 'Trade not found.')
+    const role = roleIn(contact, trade)
+    if (!role) throw new HttpError(403, 'Only the seller and trader can add evidence.')
+    const count = db.query<{ n: number }, string>('SELECT count(*) AS n FROM trade_evidence WHERE trade_id = ?').get(tradeId.toString())
+    if ((count?.n ?? 0) >= MAX_EVIDENCE_PER_TRADE) throw new HttpError(429, 'This trade already has the maximum amount of evidence.')
+    db.query('INSERT INTO trade_evidence (trade_id, role, author, body, created_at) VALUES (?,?,?,?,?)')
+      .run(tradeId.toString(), role, contact, encrypt(dataKey, JSON.stringify({ text, ...(image ? { image } : {}) })), now())
+    return { ok: true }
+  }
+
+  async function listEvidence(contact: string, tradeIdRaw: string) {
+    let tradeId: bigint
+    try { tradeId = BigInt(tradeIdRaw) } catch { throw new HttpError(400, 'Invalid trade.') }
+    const trade = await readTrade(tradeId)
+    if (!trade) throw new HttpError(404, 'Trade not found.')
+    if (!roleIn(contact, trade)) throw new HttpError(403, 'Only the seller and trader can see this evidence.')
+    return { ok: true, evidence: evidenceFor(tradeId) }
+  }
+
+  /** Everything the admin needs to decide a dispute. */
+  async function adminDispute(tradeIdRaw: string) {
+    let tradeId: bigint
+    try { tradeId = BigInt(tradeIdRaw) } catch { throw new HttpError(400, 'Invalid trade.') }
+    const trade = await readTrade(tradeId)
+    if (!trade) throw new HttpError(404, 'Trade not found.')
+    const details = db.query<{ details: string }, string>('SELECT details FROM trade_details WHERE trade_id = ?').get(tradeId.toString())
+    const who = (address: string) => {
+      const row = db.query<{ ptp_id: string; display_name: string; email: string }, string>(
+        `SELECT u.ptp_id, u.display_name, u.email FROM linked_wallets w JOIN users u ON u.email = w.email
+         WHERE w.address = ? AND w.verified = 1 LIMIT 1`).get(address.toLowerCase())
+      return row ? { ptpId: row.ptp_id, name: row.display_name, contact: row.email } : null
+    }
+    return {
+      ok: true,
+      seller: who(trade.seller),
+      trader: who(trade.trader),
+      bankDetails: details ? decrypt(dataKey, details.details) : null,
+      evidence: evidenceFor(tradeId),
+    }
+  }
+
   function adminListKyc(status: string) {
     const rows = db.query<Record<string, unknown>, string>(
       `SELECT k.id, k.contact, k.full_name, k.id_type, k.id_number, k.country_code, k.status, k.reason, k.submitted_at,
@@ -758,6 +837,9 @@ export function createApi(opts: ApiOptions) {
       if (m === 'POST' && route === '/kyc/submit') return json(submitKyc(sessionContact(req), await readBody(req)))
       if (m === 'POST' && route === '/trade-details') return json(await postTradeDetails(sessionContact(req), await readBody(req)))
       if (m === 'GET' && route === '/trade-details') return json(await getTradeDetails(sessionContact(req), url.searchParams.get('tradeId') ?? ''))
+      if (m === 'POST' && route === '/trade-evidence') return json(await addEvidence(sessionContact(req), await readBody(req)))
+      if (m === 'GET' && route === '/trade-evidence') return json(await listEvidence(sessionContact(req), url.searchParams.get('tradeId') ?? ''))
+      if (m === 'GET' && route === '/admin/dispute') { requireAdmin(req); return json(await adminDispute(url.searchParams.get('tradeId') ?? '')) }
 
       const adminMatch = route.match(/^\/admin\/kyc(?:\/(\d+))?$/)
       if (adminMatch) {

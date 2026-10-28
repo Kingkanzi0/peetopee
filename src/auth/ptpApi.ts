@@ -177,7 +177,26 @@ export async function apiGetTradeDetails(tradeId: bigint): Promise<string | null
   return res.details
 }
 
-// ── admin (ID review) ───────────────────────────────────────────────────────
+// ── dispute evidence ────────────────────────────────────────────────────────
+
+export interface Evidence {
+  id: number
+  role: 'seller' | 'trader'
+  text: string
+  image?: string
+  createdAt: number
+}
+
+export async function apiAddEvidence(tradeId: bigint, text: string, image?: string) {
+  await request('POST', '/trade-evidence', { tradeId: tradeId.toString(), text, ...(image ? { image } : {}) }, true)
+}
+
+export async function apiListEvidence(tradeId: bigint): Promise<Evidence[]> {
+  const res = await request<{ evidence: Evidence[] }>('GET', `/trade-evidence?tradeId=${tradeId.toString()}`, undefined, true)
+  return res.evidence
+}
+
+// ── admin (ID review, disputes) ─────────────────────────────────────────────
 
 export interface KycSubmission {
   id: number
@@ -212,4 +231,11 @@ export const adminApi = {
     adminRequest<{ submission: KycSubmission }>('GET', `/admin/kyc/${id}`, token).then(r => r.submission),
   review: (token: string, id: number, decision: 'approved' | 'rejected', reason: string) =>
     adminRequest('POST', `/admin/kyc/${id}`, token, { decision, reason }),
+  dispute: (token: string, tradeId: bigint) =>
+    adminRequest<{
+      seller: { ptpId: string; name: string; contact: string } | null
+      trader: { ptpId: string; name: string; contact: string } | null
+      bankDetails: string | null
+      evidence: Evidence[]
+    }>('GET', `/admin/dispute?tradeId=${tradeId.toString()}`, token),
 }

@@ -83,6 +83,8 @@ Server tests: `cd server && bun install && bun test`
 - `src/components/PayBankScreen.tsx` + `src/payments/banks.ts` — "Pay a bank account": pick bank (OPay, UBA…), enter naira amount, best verified-trader quote, then the pre-filled escrow sell flow
 - `src/components/TransactionHistory.tsx` / `src/history/txHistory.ts` — history (local log + Arc explorer API)
 - `src/components/KycFlow.tsx`, `src/components/AdminKyc.tsx` — ID verification and review
+- `src/components/DisputeEvidence.tsx`, `src/components/AdminDisputes.tsx` — dispute evidence (both sides) and admin resolution (`resolveDispute`; the admin's Funds account must be the contract `admin`)
+- `src/hooks/useMoney.ts` — local-currency display (₦ first, USDC alongside) and the visiting country
 - `src/wallet/peetopeeConnector.ts` — wagmi connector for the built-in wallet's Funds account
 - `server/api.ts` + `server/api.test.ts` — backend and its tests
 - `src/contracts/peetopee.ts` — contract address, ABI, types, helpers
