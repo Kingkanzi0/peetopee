@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Search, Star, Clock, TrendingUp, ChevronRight, ArrowLeft, Shield, CheckCircle2 } from 'lucide-react'
+import { Search, Star, Clock, TrendingUp, ChevronRight, ArrowLeft, Shield, CheckCircle2, Building2, AtSign } from 'lucide-react'
 import { COUNTRIES, CountryDef } from '../contracts/peetopee'
 import { useAuth } from '../auth/AuthContext'
 
@@ -46,9 +46,12 @@ function formatRate(rate: number, currency: string): string {
 
 interface MarketScreenProps {
   onStartTrade?: (vendor: Vendor, country: CountryDef) => void
+  /** Main actions shown at the top of the home screen. */
+  onPayBank?: () => void
+  onSendById?: () => void
 }
 
-export function MarketScreen({ onStartTrade }: MarketScreenProps) {
+export function MarketScreen({ onStartTrade, onPayBank, onSendById }: MarketScreenProps) {
   const { profile } = useAuth()
   const [query, setQuery] = useState('')
   const [selectedCountry, setSelectedCountry] = useState<CountryDef | null>(
@@ -210,9 +213,32 @@ export function MarketScreen({ onStartTrade }: MarketScreenProps) {
   // Country selection
   return (
     <div className="max-w-lg mx-auto px-4 pt-4 pb-8">
+      {(onPayBank || onSendById) && (
+        <div className="grid grid-cols-2 gap-3 mb-6">
+          {onPayBank && (
+            <button onClick={onPayBank}
+              className="rounded-2xl p-4 text-left transition-all active:scale-[0.98]"
+              style={{ background: 'linear-gradient(135deg, #0f2557 0%, #1d4ed8 100%)' }}>
+              <Building2 className="size-6 text-white mb-3" />
+              <div className="text-sm font-bold text-white">Pay a bank account</div>
+              <div className="text-xs text-white/70 mt-0.5">USDC in, naira out — OPay, UBA, GTBank…</div>
+            </button>
+          )}
+          {onSendById && (
+            <button onClick={onSendById}
+              className="rounded-2xl p-4 text-left transition-all active:scale-[0.98]"
+              style={{ background: 'var(--surface-strong)', border: '1.5px solid var(--border)' }}>
+              <AtSign className="size-6 mb-3" style={{ color: 'var(--accent)' }} />
+              <div className="text-sm font-bold" style={{ color: 'var(--ink)' }}>Send to a Peetopee ID</div>
+              <div className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>Instant USDC to any @handle</div>
+            </button>
+          )}
+        </div>
+      )}
+
       <div className="mb-5">
         <h1 className="text-xl font-bold mb-0.5" style={{ color: 'var(--ink)', fontFamily: "'Space Grotesk', sans-serif", letterSpacing: '-0.02em' }}>
-          Where are you travelling?
+          Or sell USDC in a country
         </h1>
         <p className="text-sm" style={{ color: 'var(--muted)' }}>
           Select a country to see verified vendors and live rates.

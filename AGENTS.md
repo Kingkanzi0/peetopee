@@ -80,6 +80,7 @@ Server tests: `cd server && bun install && bun test`
 - `src/components/TradeBankDetails.tsx` — shows a trade's bank details to its seller/trader
 - `src/components/FundsScreen.tsx` — Funds + Wallet balances in USDC and the visiting country's currency; Wallet ↔ Funds moves
 - `src/components/SendUsdcByPtpId.tsx` — send USDC by @handle with live lookup + avatar
+- `src/components/PayBankScreen.tsx` + `src/payments/banks.ts` — "Pay a bank account": pick bank (OPay, UBA…), enter naira amount, best verified-trader quote, then the pre-filled escrow sell flow
 - `src/components/TransactionHistory.tsx` / `src/history/txHistory.ts` — history (local log + Arc explorer API)
 - `src/components/KycFlow.tsx`, `src/components/AdminKyc.tsx` — ID verification and review
 - `src/wallet/peetopeeConnector.ts` — wagmi connector for the built-in wallet's Funds account

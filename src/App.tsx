@@ -21,6 +21,7 @@ import { useTradeNotifications } from './hooks/useTradeNotifications'
 import { useWalletLink } from './hooks/useWalletLink'
 import type { CountryDef, TraderProfile } from './contracts/peetopee'
 import { AdminKyc } from './components/AdminKyc'
+import { PayBankScreen } from './components/PayBankScreen'
 import { useVisitingCountry } from './components/FundsScreen'
 import { useAppWallet } from './wallet/appWallet'
 import { unlockWallet, lockWallet } from './wallet/standaloneWallet'
@@ -31,6 +32,7 @@ type Screen =
   | { id: 'traders'; country: CountryDef }
   | { id: 'sell'; country: CountryDef; trader: TraderProfile }
   | { id: 'trade'; tradeId: bigint }
+  | { id: 'paybank' }
 
 type Tab = 'market' | 'send' | 'funds' | 'wallet' | 'trader'
 
@@ -81,6 +83,7 @@ function MainApp() {
   const [tab, setTab] = useState<Tab>('market')
   const [screen, setScreen] = useState<Screen>({ id: 'market' })
   const [openTraderRegister, setOpenTraderRegister] = useState(false)
+  const [sendStartUsdc, setSendStartUsdc] = useState(false)
 
   useTradeNotifications(address)
   useWalletLink() // registers the built-in wallet's addresses with your Peetopee ID (automatic)
@@ -120,6 +123,8 @@ function MainApp() {
               {screen.id === 'market' && (
                 <>
                   <MarketScreen
+                    onPayBank={() => setScreen({ id: 'paybank' })}
+                    onSendById={() => { setSendStartUsdc(true); setTab('send') }}
                     onStartTrade={(vendor, country) => {
                       // Find the matching onchain trader profile or fall back to demo flow
                       setScreen({ id: 'traders', country })
@@ -133,6 +138,15 @@ function MainApp() {
                   country={screen.country}
                   onBack={() => setScreen({ id: 'market' })}
                   onSelectTrader={t => setScreen({ id: 'sell', country: screen.country, trader: t })}
+                  onRegisterTrader={() => { setOpenTraderRegister(true); setTab('trader') }}
+                />
+              )}
+              {screen.id === 'paybank' && (
+                <PayBankScreen
+                  initialCountry={visiting}
+                  onBack={() => setScreen({ id: 'market' })}
+                  onTradeCreated={id => goToTrade(id)}
+                  onAddFunds={() => setTab('funds')}
                   onRegisterTrader={() => { setOpenTraderRegister(true); setTab('trader') }}
                 />
               )}
@@ -167,7 +181,11 @@ function MainApp() {
 
           {/* SEND TAB */}
           {tab === 'send' && (
-            <SendScreen onPayBank={() => { if (visiting) openTraders(visiting); else { setScreen({ id: 'market' }); setTab('market') } }} />
+            <SendScreen
+              key={sendStartUsdc ? 'usdc' : 'choose'}
+              startWithUsdc={sendStartUsdc}
+              onPayBank={() => { setScreen({ id: 'paybank' }); setTab('market') }}
+            />
           )}
 
           {/* FUNDS TAB */}
@@ -200,7 +218,7 @@ function MainApp() {
           }}
         >
           <NavTab active={tab === 'market'} label="Market" icon={<ShoppingBag className="size-5" />} onClick={() => { setTab('market'); setScreen({ id: 'market' }) }} />
-          <NavTab active={tab === 'send'} label="Send" icon={<Send className="size-5" />} onClick={() => setTab('send')} />
+          <NavTab active={tab === 'send'} label="Send" icon={<Send className="size-5" />} onClick={() => { setSendStartUsdc(false); setTab('send') }} />
           <NavTab active={tab === 'funds'} label="Funds" icon={<Banknote className="size-5" />} onClick={() => setTab('funds')} />
           <NavTab active={tab === 'wallet'} label="Wallet" icon={<Wallet className="size-5" />} onClick={() => setTab('wallet')} />
           <NavTab active={tab === 'trader'} label="Trader" icon={<LayoutDashboard className="size-5" />} onClick={() => setTab('trader')} />

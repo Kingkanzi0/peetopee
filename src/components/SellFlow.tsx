@@ -25,6 +25,8 @@ interface Props {
   onTradeCreated: (tradeId: bigint) => void
   /** Opens the Funds tab so the user can move USDC Wallet → Funds. */
   onAddFunds: () => void
+  /** Skip straight to the confirm step with these values (used by "Pay a bank account"). */
+  prefill?: { amount: string; bankDetails: string }
 }
 
 type Step = 'amount' | 'bank' | 'confirm' | 'approving' | 'locking' | 'sharing'
@@ -37,13 +39,13 @@ export function SellFlow(props: Props) {
   )
 }
 
-function SellFlowInner({ country, trader, onBack, onTradeCreated, onAddFunds }: Props) {
+function SellFlowInner({ country, trader, onBack, onTradeCreated, onAddFunds, prefill }: Props) {
   const { address } = useAccount() // your Funds account (built-in wallet)
   const decimals = usdcDecimalsFor(ARC_TESTNET_CHAIN_ID)
 
-  const [step, setStep] = useState<Step>('amount')
-  const [amount, setAmount] = useState('')
-  const [bankDetails, setBankDetails] = useState('')
+  const [step, setStep] = useState<Step>(prefill ? 'confirm' : 'amount')
+  const [amount, setAmount] = useState(prefill?.amount ?? '')
+  const [bankDetails, setBankDetails] = useState(prefill?.bankDetails ?? '')
   const [error, setError] = useState('')
   const handledReceipt = useRef<string | null>(null)
 
@@ -166,7 +168,7 @@ function SellFlowInner({ country, trader, onBack, onTradeCreated, onAddFunds }: 
     <div className="mx-auto max-w-lg px-4 py-4">
       <button onClick={onBack} className="mb-4 flex items-center gap-1.5 text-sm" style={{ color: 'var(--muted)' }} disabled={isProcessing}>
         <ArrowLeft className="size-4" />
-        Back to traders
+        {prefill ? 'Back' : 'Back to traders'}
       </button>
 
       {/* Trader summary */}
@@ -299,7 +301,12 @@ function SellFlowInner({ country, trader, onBack, onTradeCreated, onAddFunds }: 
 
           <div className="rounded-2xl p-4 space-y-3" style={{ background: 'var(--surface-strong)', border: '1px solid var(--border)' }}>
             <Row label="You lock" value={`${amount} USDC`} bold />
-            <Row label="You receive" value={`${country.currencySymbol}${localFmt} ${trader.currencyCode}`} bold success />
+            <Row label={prefill ? 'They receive' : 'You receive'} value={`${country.currencySymbol}${localFmt} ${trader.currencyCode}`} bold success />
+            {prefill && (
+              <div className="rounded-xl p-3 text-xs whitespace-pre-wrap" style={{ background: 'var(--surface-muted)', color: 'var(--ink)' }}>
+                {trimmedDetails}
+              </div>
+            )}
             <div className="border-t" style={{ borderColor: 'var(--border)' }} />
             <Row label="Trader" value={`${trader.traderAddr.slice(0, 6)}...${trader.traderAddr.slice(-4)}`} />
             <Row label="Rate" value={formatRate(trader.exchangeRate, trader.currencyCode) + ' / USDC'} />
@@ -314,6 +321,17 @@ function SellFlowInner({ country, trader, onBack, onTradeCreated, onAddFunds }: 
             </p>
           </div>
 
+          {balance != null && !enoughFunds && (
+            <div className="mt-3 rounded-2xl p-3 flex items-center gap-3" style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)' }}>
+              <p className="flex-1 text-xs" style={{ color: '#92400e' }}>
+                Your Funds balance is {balance.toFixed(2)} USDC. Move at least {(Number(amount) - sellable).toFixed(2)} more USDC from your Wallet to Funds.
+              </p>
+              <button onClick={onAddFunds} className="shrink-0 rounded-xl px-3 py-2 text-xs font-semibold text-white flex items-center gap-1" style={{ background: 'var(--accent)' }}>
+                <ArrowDownToLine className="size-3.5" /> Add to Funds
+              </button>
+            </div>
+          )}
+
           {error && (
             <div className="mt-3 flex items-start gap-2 rounded-xl p-3" style={{ background: 'rgba(186,43,76,0.06)', border: '1px solid rgba(186,43,76,0.15)' }}>
               <AlertTriangle className="size-4 mt-0.5 shrink-0" style={{ color: 'var(--danger)' }} />
@@ -327,7 +345,8 @@ function SellFlowInner({ country, trader, onBack, onTradeCreated, onAddFunds }: 
             </button>
             <button
               onClick={handleConfirm}
-              className="flex-1 rounded-2xl py-3.5 text-sm font-semibold text-white transition-all hover:scale-[1.01] active:scale-[0.99]"
+              disabled={!amountValid}
+              className="flex-1 rounded-2xl py-3.5 text-sm font-semibold text-white transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-40"
               style={{ background: 'var(--accent)' }}
             >
               Lock in escrow

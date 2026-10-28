@@ -12,13 +12,15 @@ import { SendUsdcByPtpId } from './SendUsdcByPtpId'
 import { TransactionHistory } from './TransactionHistory'
 
 interface Props {
-  /** Go to the Market's trader list to pay a bank account in local currency. */
+  /** Open "Pay a bank account" (local currency paid out by a verified trader). */
   onPayBank: () => void
+  /** Open straight on "Send USDC by Peetopee ID". */
+  startWithUsdc?: boolean
 }
 
-export function SendScreen({ onPayBank }: Props) {
+export function SendScreen({ onPayBank, startWithUsdc }: Props) {
   const { profile } = useAuth()
-  const [mode, setMode] = useState<'choose' | 'usdc'>('choose')
+  const [mode, setMode] = useState<'choose' | 'usdc'>(startWithUsdc ? 'usdc' : 'choose')
   const [copied, setCopied] = useState(false)
   const myId = profile?.ptpId
 
@@ -76,9 +78,9 @@ export function SendScreen({ onPayBank }: Props) {
             <Building2 className="size-6 text-emerald-600" />
           </div>
           <div className="flex-1">
-            <div className="font-bold text-sm mb-0.5" style={{ color: 'var(--ink)' }}>Pay a local bank account</div>
+            <div className="font-bold text-sm mb-0.5" style={{ color: 'var(--ink)' }}>Pay a bank account</div>
             <div className="text-xs" style={{ color: 'var(--muted)' }}>
-              Pay a shop or person in their local currency. A verified local trader sends the money; your USDC stays in escrow until it arrives.
+              Naira into OPay, UBA, GTBank or any bank. A verified trader sends it; your USDC stays in escrow until it arrives.
             </div>
           </div>
           <ChevronRight className="size-5 shrink-0" style={{ color: 'var(--subtle)' }} />
