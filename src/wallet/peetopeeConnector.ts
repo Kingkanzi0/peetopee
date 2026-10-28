@@ -9,17 +9,18 @@
  */
 import { createConnector } from 'wagmi'
 import {
-  createPublicClient, createWalletClient, http, getAddress, numberToHex, fromHex,
+  createPublicClient, createWalletClient, getAddress, numberToHex, fromHex,
   SwitchChainError, UserRejectedRequestError,
   type EIP1193Provider, type Hex, type Address,
 } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import { arcTestnet } from 'viem/chains'
+import { arcTransport } from './arcNetwork'
 import { getFundsPrivateKey, isWalletUnlocked, loadStoredWallet, subscribeWallet } from './standaloneWallet'
 
 export const PEETOPEE_CONNECTOR_ID = 'peetopee'
 
-const publicClient = createPublicClient({ chain: arcTestnet, transport: http() })
+const publicClient = createPublicClient({ chain: arcTestnet, transport: arcTransport() })
 
 function fundsAccount() {
   const key = getFundsPrivateKey()
@@ -52,7 +53,7 @@ const provider = {
       case 'eth_sendTransaction': {
         const tx = (params?.[0] ?? {}) as TxParams
         const account = fundsAccount()
-        const wallet = createWalletClient({ account, chain: arcTestnet, transport: http() })
+        const wallet = createWalletClient({ account, chain: arcTestnet, transport: arcTransport() })
         return wallet.sendTransaction({
           account,
           chain: arcTestnet,

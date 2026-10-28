@@ -10,8 +10,9 @@
  * wallet's Funds account.
  */
 
-import { http, createConfig } from 'wagmi'
+import { createConfig } from 'wagmi'
 import { arcTestnet } from 'viem/chains'
+import { arcTransport } from './wallet/arcNetwork'
 import { registerChain } from './tracing'
 import { peetopeeWallet } from './wallet/peetopeeConnector'
 
@@ -21,6 +22,6 @@ export const config = createConfig({
   chains: [arcTestnet],
   connectors: [peetopeeWallet()],
   transports: {
-    [arcTestnet.id]: http(),
+    [arcTestnet.id]: arcTransport(),
   },
 })

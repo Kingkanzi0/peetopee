@@ -7,11 +7,12 @@
  */
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import {
-  createPublicClient, createWalletClient, http, erc20Abi, parseUnits, formatUnits,
+  createPublicClient, createWalletClient, erc20Abi, parseUnits, formatUnits,
   BaseError, type Address, type Hex,
 } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import { arcTestnet } from 'viem/chains'
+import { arcTransport } from './arcNetwork'
 import {
   getFundsPrivateKey, getPrivateKey, isWalletUnlocked, loadStoredWallet, subscribeWallet,
   type StoredWallet,
@@ -22,7 +23,7 @@ export const USDC_DECIMALS = 6
 /** Kept back from "Max" to pay Arc network fees (which are paid in USDC). */
 export const GAS_RESERVE_USDC = 0.02
 
-const arcClient = createPublicClient({ chain: arcTestnet, transport: http() })
+const arcClient = createPublicClient({ chain: arcTestnet, transport: arcTransport() })
 
 let snapshot: { wallet: StoredWallet | null; unlocked: boolean } = { wallet: loadStoredWallet(), unlocked: isWalletUnlocked() }
 function refreshSnapshot() {
@@ -65,7 +66,7 @@ export async function sendUsdcOnArc(from: 'wallet' | 'funds', to: Address, amoun
   const key = from === 'wallet' ? getPrivateKey() : getFundsPrivateKey()
   if (!key) throw new Error('Unlock Peetopee with your PIN to send.')
   const account = privateKeyToAccount(key)
-  const client = createWalletClient({ account, chain: arcTestnet, transport: http() })
+  const client = createWalletClient({ account, chain: arcTestnet, transport: arcTransport() })
   return client.writeContract({
     account,
     chain: arcTestnet,

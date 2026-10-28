@@ -21,6 +21,7 @@ import {
 } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import { arcTestnet, baseSepolia, arbitrumSepolia, polygonAmoy } from 'viem/chains'
+import { arcTransport } from './arcNetwork'
 import { erc20Abi } from 'viem'
 
 // ---- Storage ----------------------------------------------------------------
@@ -313,7 +314,7 @@ const VIEM_CHAINS = {
 export function getPublicClient(chainId: number) {
   const chain = VIEM_CHAINS[chainId as keyof typeof VIEM_CHAINS]
   if (!chain) throw new Error(`Unsupported chain ${chainId}`)
-  return createPublicClient({ chain, transport: http() })
+  return createPublicClient({ chain, transport: chain.id === arcTestnet.id ? arcTransport() : http() })
 }
 
 // ---- Balance reads ----------------------------------------------------------
@@ -367,7 +368,7 @@ export async function sendToken(
   const chain = VIEM_CHAINS[chainId as keyof typeof VIEM_CHAINS]
   if (!chain) throw new Error(`Unsupported chain ${chainId}`)
   const account = privateKeyToAccount(privKey)
-  const walletClient = createWalletClient({ account, chain, transport: http() })
+  const walletClient = createWalletClient({ account, chain, transport: chain.id === arcTestnet.id ? arcTransport() : http() })
   const amountBigInt = parseUnits(amount, token.decimals)
 
   if (token.address === 'native') {
