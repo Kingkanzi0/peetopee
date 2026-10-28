@@ -55,6 +55,20 @@ Peetopee is a peer-to-peer marketplace where sellers lock USDC in escrow and loc
    JSON-RPC relay) and history via `/api/history`, falling back to the public endpoints in
    `src/wallet/arcNetwork.ts`. Browser blockers like Brave Shields block public RPC hosts, not the app's own server.
 
+## Escrow V2 (trader bonds) — upgrade steps
+
+`contracts/PeetopeeEscrowV2.sol` adds trader bonds (min deposit, slashable to the seller on a lost
+dispute), a 48h confirm window after "fiat sent" (trader can `claimAfterConfirmWindow`), fee fixed at
+creation, correct country lists and rating counts. Tests: `contracts/test/PeetopeeEscrowV2.t.sol`
+(22 unit tests + 2 invariants). V1 stays deployed; the app uses V2 only once its address is set.
+
+1. Deploy V2 on Arc Testnet: constructor `(0x3600…0000 USDC, admin, treasury, feeBps=50, minTraderBond=50000000)`.
+   `admin` should be the operator's Peetopee **Funds** address so disputes can be resolved in-app.
+   Script: `contracts/script/DeployEscrowV2.s.sol` (env ADMIN, TREASURY, FEE_BPS, MIN_BOND).
+2. Put the address in `ESCROW_V2_ADDRESS` in `src/contracts/peetopee.ts`.
+3. Set `ESCROW_ADDRESS=<V2 address>` on the server (Render env var) so bank details/evidence use V2 trades.
+4. Traders must re-register and lock a deposit on V2 (Trader tab). Open V1 trades finish on V1.
+
 ## Server environment variables
 
 | Variable | Purpose |

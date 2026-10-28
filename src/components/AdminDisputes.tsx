@@ -11,9 +11,9 @@
  */
 import { useEffect, useMemo, useState } from 'react'
 import { useAccount, useReadContract, useReadContracts, useWriteContract, useWaitForTransactionReceipt } from 'wagmi'
-import { formatUnits } from 'viem'
+import { formatUnits, parseUnits } from 'viem'
 import { Loader2, Copy, Check, Scale } from 'lucide-react'
-import { PEETOPEE_ESCROW, PEETOPEE_ESCROW_ADDRESS, ARC_TESTNET_CHAIN_ID, TradeStatus, type Trade } from '../contracts/peetopee'
+import { PEETOPEE_ESCROW, PEETOPEE_ESCROW_ADDRESS, ARC_TESTNET_CHAIN_ID, IS_ESCROW_V2, TradeStatus, type Trade, type TraderProfile } from '../contracts/peetopee'
 import { adminApi, ApiError } from '../auth/ptpApi'
 import { EvidenceList } from './DisputeEvidence'
 import { friendlyTxError } from '../wallet/appWallet'
@@ -116,6 +116,14 @@ function DisputeDetail({ trade, adminToken, canResolve, onBack, onResolved }: {
   const [info, setInfo] = useState<Awaited<ReturnType<typeof adminApi.dispute>> | null>(null)
   const [error, setError] = useState('')
   const [choice, setChoice] = useState<boolean | null>(null)
+  const [slash, setSlash] = useState('')
+  // V2: the trader's bond, so the admin can compensate the seller from it
+  const { data: traderProfile } = useReadContract({
+    ...PEETOPEE_ESCROW, functionName: 'getTraderProfile', args: [trade.trader as `0x${string}`],
+    chainId: ARC_TESTNET_CHAIN_ID, query: { enabled: IS_ESCROW_V2 },
+  })
+  const bond = (traderProfile as TraderProfile | undefined)?.bond ?? 0n
+  const slashRaw = (() => { try { return slash ? parseUnits(slash, 6) : 0n } catch { return -1n } })()
   const { writeContract, data: txHash, isPending, error: writeError } = useWriteContract()
   const { isLoading: confirming, isSuccess } = useWaitForTransactionReceipt({ hash: txHash })
 
@@ -125,10 +133,17 @@ function DisputeDetail({ trade, adminToken, canResolve, onBack, onResolved }: {
   useEffect(() => { if (isSuccess) onResolved() }, [isSuccess]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function resolve(releaseToTrader: boolean) {
-    const who = releaseToTrader ? 'release the USDC to the TRADER' : 'REFUND the seller'
+    const slashNote = !releaseToTrader && slashRaw > 0n ? ` and pay the seller ${formatUnits(slashRaw, 6)} USDC from the trader's bond` : ''
+    const who = releaseToTrader ? 'release the USDC to the TRADER' : `REFUND the seller${slashNote}`
     if (!window.confirm(`Trade #${trade.tradeId}: ${who}? This cannot be undone.`)) return
     setChoice(releaseToTrader)
-    writeContract({ ...PEETOPEE_ESCROW, functionName: 'resolveDispute', args: [trade.tradeId, releaseToTrader] })
+    writeContract({
+      ...PEETOPEE_ESCROW,
+      functionName: 'resolveDispute',
+      args: IS_ESCROW_V2
+        ? [trade.tradeId, releaseToTrader, releaseToTrader ? 0n : (slashRaw > 0n ? slashRaw : 0n)]
+        : [trade.tradeId, releaseToTrader],
+    })
   }
 
   const person = (p: { ptpId: string; name: string; contact: string } | null | undefined, addr: string) =>
@@ -161,6 +176,19 @@ function DisputeDetail({ trade, adminToken, canResolve, onBack, onResolved }: {
 
       {error && <p className="text-xs" style={{ color: 'var(--danger)' }}>{error}</p>}
       {writeError && !busy && <p className="text-xs" style={{ color: 'var(--danger)' }}>{friendlyTxError(writeError)}</p>}
+
+      {IS_ESCROW_V2 && (
+        <div>
+          <label className="mb-1.5 block text-xs font-medium" style={{ color: 'var(--muted)' }}>
+            If refunding: compensation for the seller from the trader's bond (USDC, optional) · bond {formatUnits(bond, 6)} USDC
+          </label>
+          <input value={slash} inputMode="decimal" placeholder="0"
+            onChange={e => { const v = e.target.value.replace(/[^0-9.]/g, ''); if (/^\d*\.?\d{0,6}$/.test(v)) setSlash(v) }}
+            className="w-full rounded-xl px-3 py-2.5 outline-none"
+            style={{ background: 'var(--surface-muted)', border: `1px solid ${slashRaw < 0n || slashRaw > bond ? 'var(--danger)' : 'var(--border)'}`, color: 'var(--ink)', fontSize: 16 }} />
+          {slashRaw > bond && <p className="mt-1 text-xs" style={{ color: 'var(--danger)' }}>More than the bond — it will be capped at {formatUnits(bond, 6)} USDC.</p>}
+        </div>
+      )}
 
       <div className="flex gap-2">
         <button onClick={() => resolve(false)} disabled={!canResolve || busy}

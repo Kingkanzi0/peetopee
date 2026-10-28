@@ -33,6 +33,10 @@ services:
         sync: false
       - key: OTP_FROM_EMAIL
         sync: false
+      # Escrow contract the server checks trades against. Leave unset for V1;
+      # after deploying PeetopeeEscrowV2, set ESCROW_ADDRESS to its address here.
+      # - key: ESCROW_ADDRESS
+      #   value: "0x..."
       # Secret for the ID review page. Render generates it; copy it from the dashboard.
       - key: ADMIN_TOKEN
         generateValue: true

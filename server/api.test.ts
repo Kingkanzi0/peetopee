@@ -128,6 +128,23 @@ describe('helpers', () => {
     expect(normalizeContact('nope')).toBe('')
   })
 
+  test('decodes a V2 getTrade (extra feeBps field)', () => {
+    const str = Buffer.from('0xabc', 'utf8')
+    const hexStr = str.toString('hex').padEnd(64, '0')
+    const v2 = '0x' + [
+      word(32n), word(11n), word(alice.address), word(bob.address), word(5n), word(6n),
+      word(13n * 32n),             // string offset (13 head words in V2)
+      word(1n), word(1n), word(0n), word(0n), word(0n), word(0n), word(50n), // ... + feeBps
+      word(BigInt(str.length)),
+    ].join('') + hexStr
+    const t = decodeGetTrade(v2)!
+    expect(t.tradeId).toBe(11n)
+    expect(t.seller).toBe(alice.address)
+    expect(t.trader).toBe(bob.address)
+    expect(t.bankDetails).toBe('0xabc')
+    expect(t.status).toBe(1)
+  })
+
   test('decodes getTrade', () => {
     const t = decodeGetTrade(encodeTrade({ id: 7n, seller: alice.address, trader: bob.address, bankDetails: 'hello', status: 1 }))!
     expect(t.tradeId).toBe(7n)

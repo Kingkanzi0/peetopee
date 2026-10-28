@@ -12,7 +12,7 @@ import { useReadContract, useReadContracts } from 'wagmi'
 import { formatUnits } from 'viem'
 import { ArrowLeft, Building2, ChevronRight, Loader2, ShieldCheck, BadgePlus, Info } from 'lucide-react'
 import {
-  PEETOPEE_ESCROW, ARC_TESTNET_CHAIN_ID, COUNTRIES, getCountryByCode, formatRate,
+  PEETOPEE_ESCROW, ARC_TESTNET_CHAIN_ID, COUNTRIES, getCountryByCode, formatRate, IS_ESCROW_V2,
   type CountryDef, type TraderProfile,
 } from '../contracts/peetopee'
 import { apiVerifiedAddresses } from '../auth/ptpApi'
@@ -72,6 +72,11 @@ export function PayBankScreen({ initialCountry, onBack, onTradeCreated, onAddFun
     })),
     query: { enabled: addrs.length > 0 },
   })
+  // V2: traders need a deposit of at least minTraderBond to take trades
+  const { data: minBondRaw } = useReadContract({
+    ...PEETOPEE_ESCROW, functionName: 'minTraderBond', chainId: ARC_TESTNET_CHAIN_ID, query: { enabled: IS_ESCROW_V2 },
+  })
+  const minBond = (minBondRaw as bigint | undefined) ?? 0n
   const [verified, setVerified] = useState<Record<string, boolean> | null>(null)
   const addrKey = addrs.join(',')
   useEffect(() => {
@@ -87,8 +92,9 @@ export function PayBankScreen({ initialCountry, onBack, onTradeCreated, onAddFun
   const traders: TraderProfile[] = useMemo(() => (profileResults ?? [])
     .map(r => r.result as TraderProfile | undefined)
     .filter((p): p is TraderProfile => !!p && p.isActive && p.countryCode === country.code
-      && !!verified?.[p.traderAddr.toLowerCase()]),
-  [profileResults, verified, country.code])
+      && !!verified?.[p.traderAddr.toLowerCase()]
+      && (!IS_ESCROW_V2 || (p.bond ?? 0n) >= minBond)),
+  [profileResults, verified, country.code, minBond])
 
   const localScaled = parseLocal(localAmount)
   const quotes: Quote[] = useMemo(() => traders
