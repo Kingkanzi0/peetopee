@@ -19,6 +19,7 @@ import {
 } from '../wallet/appWallet'
 import { recordTx, updateTxStatus } from '../history/txHistory'
 import { TransactionHistory } from './TransactionHistory'
+import { useNairaConfig, useNairaBalance, formatNaira } from '../naira/nairaToken'
 
 export { useVisitingCountry } from '../hooks/useMoney'
 import { useVisitingCountry, useMoney } from '../hooks/useMoney'
@@ -31,9 +32,11 @@ function formatLocal(amount: number, c: CountryDef) {
 interface Props {
   onSell: (country: CountryDef) => void
   onOpenWallet: () => void
+  /** Open the naira account (shown when it's switched on). */
+  onOpenNaira?: () => void
 }
 
-export function FundsScreen({ onSell, onOpenWallet }: Props) {
+export function FundsScreen({ onSell, onOpenWallet, onOpenNaira }: Props) {
   const { profile } = useAuth()
   const { wallet, unlocked } = useAppWallet()
   const [visiting, setVisiting] = useVisitingCountry()
@@ -41,6 +44,8 @@ export function FundsScreen({ onSell, onOpenWallet }: Props) {
   const { rate, rateSource: source } = money
   const funds = useUsdcBalance(wallet?.fundsAddress)
   const main = useUsdcBalance(wallet?.address)
+  const nairaCfg = useNairaConfig()
+  const naira = useNairaBalance(wallet?.address)
   const [move, setMove] = useState<'to_funds' | 'from_funds' | null>(null)
 
   if (!wallet) {
@@ -107,6 +112,19 @@ export function FundsScreen({ onSell, onOpenWallet }: Props) {
           </button>
         </div>
       </div>
+
+      {/* Naira account */}
+      {nairaCfg.address && onOpenNaira && (
+        <button onClick={onOpenNaira} className="w-full text-left rounded-2xl p-4 mb-3 flex items-center gap-3"
+          style={{ background: 'linear-gradient(135deg, #064e3b 0%, #059669 100%)' }}>
+          <div className="size-10 rounded-xl flex items-center justify-center shrink-0 text-white font-black" style={{ background: 'rgba(255,255,255,0.15)' }}>₦</div>
+          <div className="flex-1 min-w-0">
+            <div className="text-xs text-white/70">Naira account</div>
+            <div className="text-base font-bold tabular-nums text-white">{naira.balance == null ? '—' : formatNaira(naira.balance, { decimals: true })}</div>
+          </div>
+          <span className="text-xs font-semibold rounded-xl px-3 py-2 text-white" style={{ background: 'rgba(255,255,255,0.15)' }}>Open</span>
+        </button>
+      )}
 
       {/* Wallet card */}
       <div className="rounded-2xl p-4 mb-5 flex items-center gap-3" style={{ background: 'var(--surface-strong)', border: '1.5px solid var(--border)' }}>

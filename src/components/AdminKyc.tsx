@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { ShieldCheck, Loader2, Check, X, ArrowLeft } from 'lucide-react'
 import { adminApi, ApiError, type KycStatus, type KycSubmission } from '../auth/ptpApi'
 import { AdminDisputes } from './AdminDisputes'
+import { AdminNaira } from './AdminNaira'
 
 export function AdminKyc({ onExit }: { onExit: () => void }) {
   const [token, setToken] = useState('')
@@ -16,7 +17,7 @@ export function AdminKyc({ onExit }: { onExit: () => void }) {
   const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const [section, setSection] = useState<'ids' | 'disputes'>('ids')
+  const [section, setSection] = useState<Section>('ids')
 
   const load = useCallback(async () => {
     setBusy(true)
@@ -65,7 +66,7 @@ export function AdminKyc({ onExit }: { onExit: () => void }) {
         <h1 className="text-2xl font-bold display mb-1 flex items-center gap-2" style={{ color: 'var(--ink)' }}>
           <ShieldCheck className="size-6" /> Peetopee admin
         </h1>
-        <p className="text-sm mb-5" style={{ color: 'var(--muted)' }}>Review ID submissions and decide disputed trades.</p>
+        <p className="text-sm mb-5" style={{ color: 'var(--muted)' }}>Review ID submissions, decide disputed trades and run the naira account.</p>
 
         {!authed ? (
           <div className="max-w-sm space-y-3">
@@ -82,6 +83,11 @@ export function AdminKyc({ onExit }: { onExit: () => void }) {
           <div>
             <SectionTabs section={section} setSection={setSection} />
             <AdminDisputes adminToken={token} />
+          </div>
+        ) : section === 'naira' ? (
+          <div>
+            <SectionTabs section={section} setSection={setSection} />
+            <AdminNaira adminToken={token} />
           </div>
         ) : open ? (
           <div className="space-y-4">
@@ -148,10 +154,12 @@ export function AdminKyc({ onExit }: { onExit: () => void }) {
   )
 }
 
-function SectionTabs({ section, setSection }: { section: 'ids' | 'disputes'; setSection: (s: 'ids' | 'disputes') => void }) {
+type Section = 'ids' | 'disputes' | 'naira'
+
+function SectionTabs({ section, setSection }: { section: Section; setSection: (s: Section) => void }) {
   return (
-    <div className="flex gap-2 mb-5">
-      {([['ids', 'ID review'], ['disputes', 'Disputes']] as const).map(([k, label]) => (
+    <div className="flex gap-2 mb-5 flex-wrap">
+      {([['ids', 'ID review'], ['disputes', 'Disputes'], ['naira', 'Naira']] as const).map(([k, label]) => (
         <button key={k} onClick={() => setSection(k)} className="rounded-xl px-4 py-2 text-sm font-semibold"
           style={{ background: section === k ? 'var(--accent)' : 'var(--surface-muted)', color: section === k ? 'white' : 'var(--ink)' }}>
           {label}

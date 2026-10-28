@@ -25,6 +25,8 @@ import { PayBankScreen } from './components/PayBankScreen'
 import { useVisitingCountry } from './hooks/useMoney'
 import { lockWallet } from './wallet/standaloneWallet'
 import { useWalletSession } from './wallet/useWalletSession'
+import type { SendStart } from './components/SendScreen'
+import { useNairaConfig } from './naira/nairaToken'
 
 type Screen =
   | { id: 'market' }
@@ -85,7 +87,9 @@ function MainApp() {
   const [tab, setTab] = useState<Tab>('market')
   const [screen, setScreen] = useState<Screen>({ id: 'market' })
   const [openTraderRegister, setOpenTraderRegister] = useState(false)
-  const [sendStartUsdc, setSendStartUsdc] = useState(false)
+  const [sendStart, setSendStart] = useState<SendStart>('choose')
+  const naira = useNairaConfig()
+  const openSend = (start: SendStart) => { setSendStart(start); setTab('send') }
 
   useTradeNotifications(address)
   useWalletLink() // registers the built-in wallet's addresses with your Peetopee ID (automatic)
@@ -125,8 +129,9 @@ function MainApp() {
               {screen.id === 'market' && (
                 <>
                   <MarketScreen
-                    onPayBank={() => setScreen({ id: 'paybank' })}
-                    onSendById={() => { setSendStartUsdc(true); setTab('send') }}
+                    onPayBank={() => naira.address ? openSend('bank') : setScreen({ id: 'paybank' })}
+                    onSendById={() => openSend('usdc')}
+                    onPayBills={naira.address ? () => openSend('bills') : undefined}
                     onStartTrade={(vendor, country) => {
                       // Find the matching onchain trader profile or fall back to demo flow
                       setScreen({ id: 'traders', country })
@@ -184,14 +189,14 @@ function MainApp() {
           {/* SEND TAB */}
           {tab === 'send' && (
             <SendScreen
-              key={sendStartUsdc ? 'usdc' : 'choose'}
-              startWithUsdc={sendStartUsdc}
+              key={sendStart}
+              start={sendStart}
               onPayBank={() => { setScreen({ id: 'paybank' }); setTab('market') }}
             />
           )}
 
           {/* FUNDS TAB */}
-          {tab === 'funds' && <FundsScreen onSell={openTraders} onOpenWallet={() => setTab('wallet')} />}
+          {tab === 'funds' && <FundsScreen onSell={openTraders} onOpenWallet={() => setTab('wallet')} onOpenNaira={() => openSend('naira')} />}
 
           {/* WALLET TAB */}
           {tab === 'wallet' && <WalletTab onBack={() => setTab('market')} />}
@@ -220,7 +225,7 @@ function MainApp() {
           }}
         >
           <NavTab active={tab === 'market'} label="Market" icon={<ShoppingBag className="size-5" />} onClick={() => { setTab('market'); setScreen({ id: 'market' }) }} />
-          <NavTab active={tab === 'send'} label="Send" icon={<Send className="size-5" />} onClick={() => { setSendStartUsdc(false); setTab('send') }} />
+          <NavTab active={tab === 'send'} label="Send" icon={<Send className="size-5" />} onClick={() => openSend('choose')} />
           <NavTab active={tab === 'funds'} label="Funds" icon={<Banknote className="size-5" />} onClick={() => setTab('funds')} />
           <NavTab active={tab === 'wallet'} label="Wallet" icon={<Wallet className="size-5" />} onClick={() => setTab('wallet')} />
           <NavTab active={tab === 'trader'} label="Trader" icon={<LayoutDashboard className="size-5" />} onClick={() => setTab('trader')} />

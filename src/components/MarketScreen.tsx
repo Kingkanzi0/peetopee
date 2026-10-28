@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Search, Star, Clock, TrendingUp, ChevronRight, ArrowLeft, Shield, CheckCircle2, Building2, AtSign } from 'lucide-react'
+import { Search, Star, Clock, TrendingUp, ChevronRight, ArrowLeft, Shield, CheckCircle2, Building2, AtSign, Smartphone } from 'lucide-react'
 import { COUNTRIES, CountryDef } from '../contracts/peetopee'
 import { useAuth } from '../auth/AuthContext'
 
@@ -49,9 +49,11 @@ interface MarketScreenProps {
   /** Main actions shown at the top of the home screen. */
   onPayBank?: () => void
   onSendById?: () => void
+  /** Airtime, data, electricity, TV from the naira account (shown when it's on). */
+  onPayBills?: () => void
 }
 
-export function MarketScreen({ onStartTrade, onPayBank, onSendById }: MarketScreenProps) {
+export function MarketScreen({ onStartTrade, onPayBank, onSendById, onPayBills }: MarketScreenProps) {
   const { profile } = useAuth()
   const [query, setQuery] = useState('')
   const [selectedCountry, setSelectedCountry] = useState<CountryDef | null>(
@@ -221,7 +223,7 @@ export function MarketScreen({ onStartTrade, onPayBank, onSendById }: MarketScre
               style={{ background: 'linear-gradient(135deg, #0f2557 0%, #1d4ed8 100%)' }}>
               <Building2 className="size-6 text-white mb-3" />
               <div className="text-sm font-bold text-white">Send to bank</div>
-              <div className="text-xs text-white/70 mt-0.5">USDC in, naira out — OPay, UBA, GTBank…</div>
+              <div className="text-xs text-white/70 mt-0.5">Naira to OPay, UBA, GTBank or any bank</div>
             </button>
           )}
           {onSendById && (
@@ -231,6 +233,17 @@ export function MarketScreen({ onStartTrade, onPayBank, onSendById }: MarketScre
               <AtSign className="size-6 mb-3" style={{ color: 'var(--accent)' }} />
               <div className="text-sm font-bold" style={{ color: 'var(--ink)' }}>Send to a Peetopee ID</div>
               <div className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>Instant USDC to any @handle</div>
+            </button>
+          )}
+          {onPayBills && (
+            <button onClick={onPayBills}
+              className="col-span-2 rounded-2xl px-4 py-3.5 text-left flex items-center gap-3 transition-all active:scale-[0.98]"
+              style={{ background: 'var(--surface-strong)', border: '1.5px solid var(--border)' }}>
+              <Smartphone className="size-5 shrink-0" style={{ color: '#d97706' }} />
+              <div className="flex-1">
+                <div className="text-sm font-bold" style={{ color: 'var(--ink)' }}>Pay bills</div>
+                <div className="text-xs" style={{ color: 'var(--muted)' }}>Airtime, data, electricity, TV — from your naira account</div>
+              </div>
             </button>
           )}
         </div>

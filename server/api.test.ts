@@ -6,7 +6,7 @@ import { Database } from 'bun:sqlite'
 import { secp256k1 } from '@noble/curves/secp256k1.js'
 import { keccak_256 } from '@noble/hashes/sha3.js'
 import {
-  createApi, decodeGetTrade, keccakHex, normalizeContact, recoverPersonalSign, walletLinkMessage,
+  createApi, decodeGetTrade, RpcError, keccakHex, normalizeContact, recoverPersonalSign, walletLinkMessage,
   type RpcFn, type SendCodeFn,
 } from './api'
 
@@ -56,10 +56,17 @@ function encodeTrade(t: { id: bigint; seller: string; trader: string; bankDetail
 }
 
 let chainTrades = new Map<bigint, string>()
+const NAIRA = '0x' + 'aa'.repeat(20)
+let chainPayouts = new Map<bigint, { from: string; amount: bigint; kind: number; ref: string; status: number }>()
 const fakeRpc: RpcFn = async (method, params) => {
   if (method !== 'eth_call') throw new Error('unexpected ' + method)
-  const data = (params[0] as { data: string }).data
+  const { data, to } = params[0] as { data: string; to: string }
   const id = BigInt('0x' + data.slice(10))
+  if (to.toLowerCase() === NAIRA) {
+    const p = chainPayouts.get(id)
+    if (!p) throw new RpcError(3, 'execution reverted: UnknownPayout')
+    return '0x' + [word(p.from), word(p.amount), word(BigInt(p.kind)), word(p.ref), word(BigInt(p.status)), word(1700000000n)].join('')
+  }
   return chainTrades.get(id) ?? encodeTrade({ id: 0n, seller: '0x' + '0'.repeat(40), trader: '0x' + '0'.repeat(40), bankDetails: '' })
 }
 
@@ -71,6 +78,7 @@ let sent: { contact: string; code: string }[]
 function setup(over: Partial<Parameters<typeof createApi>[0]> = {}) {
   sent = []
   chainTrades = new Map()
+  chainPayouts = new Map()
   const sendCode: SendCodeFn = async (contact, code) => { sent.push({ contact, code }) }
   api = createApi({ db: new Database(':memory:'), rpc: fakeRpc, sendCode, adminToken: 'admin-secret', ...over })
 }
@@ -512,5 +520,102 @@ describe('dispute evidence', () => {
     expect(r.body.trader.ptpId).toBe('@bob')
     expect(r.body.bankDetails).toBe(details)
     expect(r.body.evidence).toHaveLength(2)
+  })
+})
+
+// ── naira account payouts ───────────────────────────────────────────────────
+
+describe('naira payouts', () => {
+  const bankDetails = JSON.stringify({ kind: 'bank', bank: 'OPay', accountNumber: '0123456789', accountName: 'Bob Obi' })
+  const dataDetails = JSON.stringify({ kind: 'data', network: 'MTN', phone: '08031234567', plan: '1GB · 30 days' })
+  const meterDetails = JSON.stringify({ kind: 'electricity', disco: 'Ikeja Electric', meterNumber: '45012345678', meterType: 'prepaid' })
+
+  async function aliceWithWallet(verifyId = true) {
+    const a = await signUp('alice@example.com', 'Alice', '@alice')
+    await link(a.token, a.ptpId, alice)
+    if (verifyId) {
+      await call('POST', '/kyc/submit', {
+        fullName: 'Alice A', idType: 'nin', idNumber: '12345678901', countryCode: 'NG',
+        idImage: 'data:image/png;base64,AAAA', selfie: 'data:image/png;base64,AAAA',
+      }, auth(a.token))
+    }
+    return a
+  }
+
+  test('config is off until a naira contract is set, then the admin can set it', async () => {
+    expect((await call('GET', '/config')).body.nairaAddress).toBeNull()
+    const a = await aliceWithWallet()
+    expect((await call('POST', '/payouts', { payoutId: '1', details: dataDetails }, auth(a.token))).status).toBe(503)
+    expect((await call('POST', '/admin/config', { nairaAddress: NAIRA })).status).toBe(403)
+    const set = await call('POST', '/admin/config', { nairaAddress: NAIRA }, { 'X-Admin-Token': 'admin-secret' })
+    expect(set.body.nairaAddress).toBe(NAIRA)
+    expect((await call('GET', '/config')).body.nairaAddress).toBe(NAIRA)
+  })
+
+  test('simulated data purchase is paid at once and listed', async () => {
+    setup({ nairaAddress: NAIRA, payoutMode: 'simulate' })
+    const a = await aliceWithWallet(false)
+    chainPayouts.set(1n, { from: alice.address, amount: 1_000_000_000n, kind: 2, ref: keccakHex(dataDetails), status: 1 })
+    const r = await call('POST', '/payouts', { payoutId: '1', details: dataDetails }, auth(a.token))
+    expect(r.status).toBe(200)
+    expect(r.body.payout.status).toBe('paid')
+    expect(r.body.payout.reference).toMatch(/^SIM-/)
+    expect(r.body.payout.details.phone).toBe('08031234567')
+    const again = await call('POST', '/payouts', { payoutId: '1', details: dataDetails }, auth(a.token))
+    expect(again.body.payout.reference).toBe(r.body.payout.reference) // idempotent
+    const mine = await call('GET', '/payouts', undefined, auth(a.token))
+    expect(mine.body.payouts).toHaveLength(1)
+  })
+
+  test('electricity gets a token when simulated', async () => {
+    setup({ nairaAddress: NAIRA, payoutMode: 'simulate' })
+    const a = await aliceWithWallet(false)
+    chainPayouts.set(2n, { from: alice.address, amount: 5_000_000_000n, kind: 3, ref: keccakHex(meterDetails), status: 1 })
+    const r = await call('POST', '/payouts', { payoutId: '2', details: meterDetails }, auth(a.token))
+    expect(r.body.payout.token).toMatch(/^\d{4}(-\d{4}){4}$/)
+  })
+
+  test('rejects details that do not match the on-chain hash, kind, or sender', async () => {
+    setup({ nairaAddress: NAIRA, payoutMode: 'simulate' })
+    const a = await aliceWithWallet()
+    chainPayouts.set(1n, { from: alice.address, amount: 1n, kind: 0, ref: keccakHex(bankDetails), status: 1 })
+    const tampered = bankDetails.replace('0123456789', '9999999999')
+    expect((await call('POST', '/payouts', { payoutId: '1', details: tampered }, auth(a.token))).status).toBe(400)
+    chainPayouts.set(2n, { from: alice.address, amount: 1n, kind: 1, ref: keccakHex(bankDetails), status: 1 })
+    expect((await call('POST', '/payouts', { payoutId: '2', details: bankDetails }, auth(a.token))).status).toBe(400)
+    chainPayouts.set(3n, { from: mallory.address, amount: 1n, kind: 0, ref: keccakHex(bankDetails), status: 1 })
+    expect((await call('POST', '/payouts', { payoutId: '3', details: bankDetails }, auth(a.token))).status).toBe(403)
+    expect((await call('POST', '/payouts', { payoutId: '9', details: bankDetails }, auth(a.token))).status).toBe(404)
+  })
+
+  test('bank payout without a verified ID fails so it can be refunded', async () => {
+    setup({ nairaAddress: NAIRA, payoutMode: 'simulate' })
+    const a = await aliceWithWallet(false)
+    chainPayouts.set(1n, { from: alice.address, amount: 1n, kind: 0, ref: keccakHex(bankDetails), status: 1 })
+    const r = await call('POST', '/payouts', { payoutId: '1', details: bankDetails }, auth(a.token))
+    expect(r.body.payout.status).toBe('failed')
+  })
+
+  test('manual mode waits for the operator, who marks it paid', async () => {
+    setup({ nairaAddress: NAIRA, kycAutoApprove: true })
+    const a = await aliceWithWallet()
+    chainPayouts.set(1n, { from: alice.address, amount: 50_000_000_000n, kind: 0, ref: keccakHex(bankDetails), status: 1 })
+    const r = await call('POST', '/payouts', { payoutId: '1', details: bankDetails }, auth(a.token))
+    expect(r.body.payout.status).toBe('processing')
+    const admin = { 'X-Admin-Token': 'admin-secret' }
+    const list = await call('GET', '/admin/payouts?status=processing', undefined, admin)
+    expect(list.body.payouts[0].details.accountNumber).toBe('0123456789')
+    expect((await call('POST', '/admin/payouts/1', { status: 'paid', reference: 'NIP-123' }, admin)).status).toBe(200)
+    const mine = await call('GET', '/payouts', undefined, auth(a.token))
+    expect(mine.body.payouts[0].status).toBe('paid')
+    expect(mine.body.payouts[0].reference).toBe('NIP-123')
+  })
+
+  test('bad bill details are refused', async () => {
+    setup({ nairaAddress: NAIRA, payoutMode: 'simulate' })
+    const a = await aliceWithWallet()
+    const bad = JSON.stringify({ kind: 'airtime', network: 'MTN', phone: '12345' })
+    chainPayouts.set(1n, { from: alice.address, amount: 1n, kind: 1, ref: keccakHex(bad), status: 1 })
+    expect((await call('POST', '/payouts', { payoutId: '1', details: bad }, auth(a.token))).status).toBe(400)
   })
 })
