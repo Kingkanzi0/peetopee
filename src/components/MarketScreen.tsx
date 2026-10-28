@@ -223,7 +223,7 @@ export function MarketScreen({ onStartTrade, onPayBank, onSendById, onPayBills }
               style={{ background: 'linear-gradient(135deg, #0f2557 0%, #1d4ed8 100%)' }}>
               <Building2 className="size-6 text-white mb-3" />
               <div className="text-sm font-bold text-white">Send to bank</div>
-              <div className="text-xs text-white/70 mt-0.5">Naira to OPay, UBA, GTBank or any bank</div>
+              <div className="text-xs text-white/70 mt-0.5">USDC in, naira out — a verified trader pays OPay, UBA, any bank</div>
             </button>
           )}
           {onSendById && (
@@ -234,6 +234,17 @@ export function MarketScreen({ onStartTrade, onPayBank, onSendById, onPayBills }
               <div className="text-sm font-bold" style={{ color: 'var(--ink)' }}>Send to a Peetopee ID</div>
               <div className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>Instant USDC to any @handle</div>
             </button>
+          )}
+          {!onPayBills && (
+            <div className="col-span-2 rounded-2xl px-4 py-3.5 flex items-center gap-3 opacity-70"
+              style={{ background: 'var(--surface-muted)', border: '1.5px dashed var(--border)' }}>
+              <Smartphone className="size-5 shrink-0" style={{ color: '#d97706' }} />
+              <div className="flex-1">
+                <div className="text-sm font-bold" style={{ color: 'var(--ink)' }}>Naira account & Pay bills</div>
+                <div className="text-xs" style={{ color: 'var(--muted)' }}>Coming soon</div>
+              </div>
+              <span className="rounded-full px-2 py-0.5 text-[10px] font-bold" style={{ background: 'rgba(5,150,105,0.12)', color: '#059669' }}>SOON</span>
+            </div>
           )}
           {onPayBills && (
             <button onClick={onPayBills}

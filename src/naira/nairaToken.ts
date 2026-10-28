@@ -44,7 +44,16 @@ export function reloadNairaConfig() {
 }
 
 /** { nairaAddress, payoutMode } from the server; `ready` is false until it has loaded once. */
-export function useNairaConfig() {
+/**
+ * COMING SOON switch. While false, the app shows the naira account and Pay bills as
+ * "Coming soon" and "Send to bank" uses verified P2P traders (the launch flow).
+ * Set to true once a licensed naira stablecoin / payout partner is in place.
+ * The admin page can still deploy and test it (useNairaConfig({ evenIfComingSoon: true })).
+ */
+export const NAIRA_ACCOUNT_LIVE = false
+
+export function useNairaConfig(opts: { evenIfComingSoon?: boolean } = {}) {
+  const live = NAIRA_ACCOUNT_LIVE || !!opts.evenIfComingSoon
   const snap = useSyncExternalStore(
     fn => { configListeners.add(fn); return () => { configListeners.delete(fn) } },
     () => config,
@@ -52,7 +61,7 @@ export function useNairaConfig() {
   useEffect(() => { if (!config && !configLoading) void reloadNairaConfig() }, [])
   return {
     ready: snap !== null,
-    address: (snap?.nairaAddress ?? null) as Address | null,
+    address: (live ? snap?.nairaAddress ?? null : null) as Address | null,
     simulated: snap?.payoutMode === 'simulate',
   }
 }

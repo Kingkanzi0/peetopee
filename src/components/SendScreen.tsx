@@ -95,6 +95,17 @@ export function SendScreen({ onPayBank, start = 'choose' }: Props) {
           </button>
         )}
 
+        {!naira.address && (
+          <div className="rounded-2xl p-4" style={{ background: 'var(--surface-muted)', border: '1.5px dashed var(--border)' }}>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--subtle)' }}>Coming soon</span>
+              <span className="rounded-full px-2 py-0.5 text-[10px] font-bold" style={{ background: 'rgba(5,150,105,0.12)', color: '#059669' }}>SOON</span>
+            </div>
+            <ComingSoon icon={<span className="text-base font-black">₦</span>} title="Naira account" text="Hold naira on your @handle, send it to anyone and to any bank." />
+            <ComingSoon icon={<Smartphone className="size-4" />} title="Pay bills" text="Airtime, data, electricity and TV." />
+          </div>
+        )}
+
         <button
           onClick={() => setMode('usdc')}
           className="w-full rounded-2xl p-5 text-left flex items-center gap-4 transition-all active:scale-[0.99]"
@@ -132,6 +143,18 @@ export function SendScreen({ onPayBank, start = 'choose' }: Props) {
 
       <div className="mt-8">
         <TransactionHistory compact filter={e => e.kind === 'sent' || e.kind === 'received'} title="Recent transfers" />
+      </div>
+    </div>
+  )
+}
+
+function ComingSoon({ icon, title, text }: { icon: React.ReactNode; title: string; text: string }) {
+  return (
+    <div className="flex items-start gap-3 py-2 opacity-70">
+      <div className="size-8 rounded-xl flex items-center justify-center shrink-0" style={{ background: 'white', color: '#059669' }}>{icon}</div>
+      <div>
+        <div className="text-sm font-semibold" style={{ color: 'var(--ink)' }}>{title}</div>
+        <div className="text-xs" style={{ color: 'var(--muted)' }}>{text}</div>
       </div>
     </div>
   )

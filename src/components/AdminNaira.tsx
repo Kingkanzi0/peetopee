@@ -16,14 +16,14 @@ import { useAppWallet, useUsdcBalance, friendlyTxError } from '../wallet/appWall
 import { useLocalCurrency } from '../hooks/useLocalCurrency'
 import {
   useNairaConfig, reloadNairaConfig, readNairaInfo, deployNairaContract, setNairaRate, topUpNairaReserve,
-  refundNairaPayout, formatNaira, type NairaInfo,
+  refundNairaPayout, formatNaira, NAIRA_ACCOUNT_LIVE, type NairaInfo,
 } from '../naira/nairaToken'
 import { KIND_LABEL, payoutSummary } from '../naira/bills'
 
 const input = { background: 'var(--surface-muted)', border: '1px solid var(--border)', color: 'var(--ink)', fontSize: 16 } as const
 
 export function AdminNaira({ adminToken }: { adminToken: string }) {
-  const cfg = useNairaConfig()
+  const cfg = useNairaConfig({ evenIfComingSoon: true })
   const { wallet, unlocked } = useAppWallet()
   const fundsUsdc = useUsdcBalance(wallet?.fundsAddress)
   const fx = useLocalCurrency('NGN')
@@ -108,6 +108,11 @@ export function AdminNaira({ adminToken }: { adminToken: string }) {
   const contract = cfg.address
   return (
     <div className="space-y-5">
+      {!NAIRA_ACCOUNT_LIVE && (
+        <div className="rounded-xl p-3 text-xs" style={{ background: 'rgba(245,158,11,0.08)', color: '#92400e' }}>
+          Users see the naira account as "Coming soon". Set NAIRA_ACCOUNT_LIVE = true in src/naira/nairaToken.ts to open it.
+        </div>
+      )}
       <div className="rounded-2xl p-4 text-sm space-y-1" style={{ background: 'var(--surface-strong)', border: '1px solid var(--border)', color: 'var(--ink)' }}>
         <div className="flex items-center gap-2"><b>Naira contract</b><CopyText text={contract} /></div>
         {info ? (

@@ -57,6 +57,9 @@ Peetopee is a peer-to-peer marketplace where sellers lock USDC in escrow and loc
 
 ## Naira account (testnet)
 
+**Status: COMING SOON.** `NAIRA_ACCOUNT_LIVE = false` in `src/naira/nairaToken.ts` hides it from users (they see
+"Coming soon" cards; "Send to bank" uses P2P traders). The admin page can still deploy and test it.
+
 A naira balance tied to the user's @handle, held in their own **Wallet** account as `tNGN`
 (`contracts/PeetopeeNaira.sol`, 14 tests in `contracts/test/PeetopeeNaira.t.sol`). No trader needed.
 
