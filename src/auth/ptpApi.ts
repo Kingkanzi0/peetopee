@@ -30,7 +30,15 @@ export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message) }
 }
 
-const BASE = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') ?? '/api'
+const CONFIGURED_BASE = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') || '/api'
+const LOCAL_BASE = '/api'
+/**
+ * Where API calls go. Starts at VITE_API_URL (if set). If that server can't be
+ * reached, or is an old server without this route, we fall back to /api — the
+ * server running alongside the app (Vite proxy in dev, same origin in Docker) —
+ * and stick with it for the rest of the session.
+ */
+let base = CONFIGURED_BASE
 const SESSION_KEY = 'ptp_session_token'
 
 // ── session token ───────────────────────────────────────────────────────────
@@ -57,18 +65,30 @@ async function request<T>(method: 'GET' | 'POST', path: string, body?: unknown, 
     if (!token) throw new ApiError(401, 'Please sign in again.')
     headers.Authorization = `Bearer ${token}`
   }
-  let res: Response
-  try {
-    res = await fetch(`${BASE}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) })
-  } catch {
-    throw new ApiError(0, "Can't reach the Peetopee server. Check your connection and try again.")
+  const init: RequestInit = { method, headers, body: body === undefined ? undefined : JSON.stringify(body) }
+  const attempt = async (b: string) => {
+    const res = await fetch(`${b}${path}`, init)
+    let data: Record<string, unknown> | null = null
+    try { data = await res.json() as Record<string, unknown> } catch { /* not JSON */ }
+    return { res, data }
   }
-  let data: Record<string, unknown>
+
+  let result: { res: Response; data: Record<string, unknown> | null } | null = null
   try {
-    data = await res.json() as Record<string, unknown>
-  } catch {
-    throw new ApiError(res.status, "The Peetopee server isn't responding correctly. Please try again shortly.")
+    result = await attempt(base)
+  } catch { /* unreachable — maybe try the local server below */ }
+
+  const looksWrong = !result || (result.res.status === 404 && result.data?.error === 'Not found') || (!result.data && !result.res.ok)
+  if (looksWrong && base !== LOCAL_BASE) {
+    try {
+      const local = await attempt(LOCAL_BASE)
+      if (local.data) { base = LOCAL_BASE; result = local }
+    } catch { /* keep the original result */ }
   }
+
+  if (!result) throw new ApiError(0, "Can't reach the Peetopee server. Check your connection and try again.")
+  const { res, data } = result
+  if (!data) throw new ApiError(res.status, "The Peetopee server isn't responding correctly. Please try again shortly.")
   if (!res.ok || data.ok === false) {
     if (res.status === 401 && authed) setSessionToken(null)
     throw new ApiError(res.status, String(data.error ?? 'Something went wrong.'))
@@ -175,7 +195,7 @@ export interface KycSubmission {
 }
 
 async function adminRequest<T>(method: 'GET' | 'POST', path: string, adminToken: string, body?: unknown): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
+  const res = await fetch(`${base}${path}`, {
     method,
     headers: { 'X-Admin-Token': adminToken, ...(body ? { 'Content-Type': 'application/json' } : {}) },
     body: body ? JSON.stringify(body) : undefined,
