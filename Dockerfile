@@ -1,7 +1,9 @@
-FROM oven/bun:latest
+FROM oven/bun:1.3.14
 WORKDIR /app
 
-# Copy only the server directory — no frontend deps needed
+# Server only — the frontend is built and hosted separately.
+COPY server/package.json ./server/
+RUN cd server && bun install --production
 COPY server/ ./server/
 
 RUN mkdir -p /app/data

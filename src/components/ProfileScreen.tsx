@@ -10,29 +10,27 @@ import {
 import { useAuth } from '../auth/AuthContext'
 import { AvatarPicker } from './AvatarPicker'
 import { COUNTRIES } from '../contracts/peetopee'
-import {
-  getMyPtpId, lookupByEmail, updateHandle,
-} from '../auth/peetopeeId'
+import { ApiError } from '../auth/ptpApi'
+import { KycFlow } from './KycFlow'
 
 interface ProfileScreenProps {
   onBack: () => void
 }
 
 export function ProfileScreen({ onBack }: ProfileScreenProps) {
-  const { profile, updateProfile, signOut } = useAuth()
+  const { profile, updateProfile, signOut, changePtpId } = useAuth()
   const [editName, setEditName] = useState(profile?.name ?? '')
   const [saved, setSaved] = useState(false)
   const [showCountry, setShowCountry] = useState(false)
   const [query, setQuery] = useState('')
 
   // Peetopee ID state
-  const contact = profile?.email || profile?.phone || 'user'
-  const record = profile ? lookupByEmail(contact) : null
-  const myPtpId = record?.ptpId ?? getMyPtpId() ?? '@—'
+  const myPtpId = profile?.ptpId ?? '@—'
   const [editingHandle, setEditingHandle] = useState(false)
   const [handleInput, setHandleInput] = useState(myPtpId.replace('@', ''))
   const [handleError, setHandleError] = useState('')
   const [handleSaved, setHandleSaved] = useState(false)
+  const [handleBusy, setHandleBusy] = useState(false)
   const [copied, setCopied] = useState(false)
 
   if (!profile) return null
@@ -66,16 +64,22 @@ export function ProfileScreen({ onBack }: ProfileScreenProps) {
     }
   }
 
-  function saveHandle() {
+  async function saveHandle() {
     const raw = handleInput.trim().replace('@', '').toLowerCase()
-    if (raw.length < 3) { setHandleError('Handle must be at least 3 characters'); return }
+    if (raw.length < 3 || raw.length > 20) { setHandleError('Use 3–20 characters'); return }
     if (!/^[a-z0-9_]+$/.test(raw)) { setHandleError('Letters, numbers and _ only'); return }
-    const ok = updateHandle(contact, raw)
-    if (!ok) { setHandleError('That handle is already taken'); return }
-    setHandleError('')
-    setEditingHandle(false)
-    setHandleSaved(true)
-    setTimeout(() => setHandleSaved(false), 2000)
+    setHandleBusy(true)
+    try {
+      await changePtpId(`@${raw}`)
+      setHandleError('')
+      setEditingHandle(false)
+      setHandleSaved(true)
+      setTimeout(() => setHandleSaved(false), 2000)
+    } catch (e) {
+      setHandleError(e instanceof ApiError ? e.message : 'Could not save. Try again.')
+    } finally {
+      setHandleBusy(false)
+    }
   }
 
   const contactDisplay = profile.contactMethod === 'phone'
@@ -194,7 +198,8 @@ export function ProfileScreen({ onBack }: ProfileScreenProps) {
                     <X className="size-4 text-white/50" />
                   </button>
                   <button
-                    onClick={saveHandle}
+                    onClick={() => { void saveHandle() }}
+                    disabled={handleBusy}
                     className="px-4 py-3 active:opacity-70"
                     style={{ color: '#60a5fa' }}
                   >
@@ -273,6 +278,14 @@ export function ProfileScreen({ onBack }: ProfileScreenProps) {
               <p className="text-xs leading-relaxed" style={{ color: 'var(--subtle)' }}>{text}</p>
             </div>
           ))}
+        </div>
+
+        {/* ID verification */}
+        <div>
+          <p className="text-xs font-semibold mb-2 px-1 uppercase tracking-wider" style={{ color: 'var(--subtle)' }}>ID verification</p>
+          <div className="rounded-2xl overflow-hidden" style={{ background: 'var(--surface-strong)', border: '1.5px solid var(--border)' }}>
+            <KycFlow reason="Needed to sell USDC or become a trader." />
+          </div>
         </div>
 
         {/* Contact info */}

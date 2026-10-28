@@ -1,14 +1,22 @@
 /**
- * standaloneWallet — self-contained wallet engine.
- * No wagmi, no ConnectKit, no external wallet required.
- * Creates/imports a private key, stores it encrypted in localStorage,
- * reads balances via viem publicClient, sends via walletClient.
+ * standaloneWallet — the built-in Peetopee wallet.
+ * No browser extension or WalletConnect needed.
+ *
+ * Two accounts come from one secret key:
+ *   - Wallet: your main account. People pay you here by Peetopee ID.
+ *   - Funds:  your trading account. Move USDC Wallet → Funds, then sell from
+ *             Funds in the Market. Derived from the wallet key, so your seed
+ *             phrase backs up both.
+ *
+ * At rest the key is encrypted (AES-GCM) with a device key that the browser
+ * keeps in IndexedDB and never lets JavaScript read out. It's decrypted into
+ * memory only after you unlock the app with your PIN or biometrics.
  */
 import * as bip39 from 'bip39'
 import { HDKey } from '@scure/bip32'
 import {
   createPublicClient, createWalletClient, http,
-  toHex, parseUnits, formatUnits,
+  toHex, parseUnits, formatUnits, keccak256, concat, stringToHex,
   type Address, type Hex,
 } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
@@ -16,41 +24,170 @@ import { arcTestnet, baseSepolia, arbitrumSepolia, polygonAmoy } from 'viem/chai
 import { erc20Abi } from 'viem'
 
 // ---- Storage ----------------------------------------------------------------
-const KEY_PRIVATE = 'ptp_wallet_privkey'
+const KEY_PRIVATE_LEGACY = 'ptp_wallet_privkey'   // plaintext — older versions only, migrated on unlock
+const KEY_ENCRYPTED = 'ptp_wallet_key_enc'
 const KEY_ADDRESS = 'ptp_wallet_address'
+const KEY_FUNDS_ADDRESS = 'ptp_funds_address'
 const KEY_LABEL   = 'ptp_wallet_label'
 
 export interface StoredWallet {
   address: Address
+  /** The trading (Funds) account address. */
+  fundsAddress: Address
   label: 'created' | 'imported'
 }
 
-export function loadStoredWallet(): StoredWallet | null {
-  try {
-    const pk = localStorage.getItem(KEY_PRIVATE)
-    const addr = localStorage.getItem(KEY_ADDRESS)
-    const label = localStorage.getItem(KEY_LABEL) as 'created' | 'imported' | null
-    if (!pk || !addr) return null
-    return { address: addr as Address, label: label ?? 'created' }
-  } catch { return null }
+let unlockedKey: Hex | null = null
+const listeners = new Set<() => void>()
+
+function notify() { listeners.forEach(fn => fn()) }
+
+/** Re-render hooks when the wallet is created, unlocked or deleted. */
+export function subscribeWallet(fn: () => void) {
+  listeners.add(fn)
+  return () => { listeners.delete(fn) }
 }
 
-export function saveWallet(privKey: Hex, label: 'created' | 'imported') {
+/** The trading account key is derived from the wallet key. */
+export function deriveFundsKey(walletKey: Hex): Hex {
+  return keccak256(concat([walletKey, stringToHex('peetopee-funds-v1')]))
+}
+
+function safeGet(k: string) { try { return localStorage.getItem(k) } catch { return null } }
+
+export function loadStoredWallet(): StoredWallet | null {
+  const hasKey = !!(safeGet(KEY_ENCRYPTED) || safeGet(KEY_PRIVATE_LEGACY))
+  const addr = safeGet(KEY_ADDRESS)
+  if (!hasKey || !addr) return null
+  let funds = safeGet(KEY_FUNDS_ADDRESS)
+  if (!funds && unlockedKey) {
+    funds = privateKeyToAccount(deriveFundsKey(unlockedKey)).address
+    localStorage.setItem(KEY_FUNDS_ADDRESS, funds)
+  }
+  const label = safeGet(KEY_LABEL) as 'created' | 'imported' | null
+  return { address: addr as Address, fundsAddress: (funds ?? addr) as Address, label: label ?? 'created' }
+}
+
+export function isWalletUnlocked() {
+  return unlockedKey !== null
+}
+
+// ---- device-bound encryption -------------------------------------------------
+
+function openKeyDb(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open('peetopee-keys', 1)
+    req.onupgradeneeded = () => req.result.createObjectStore('keys')
+    req.onsuccess = () => resolve(req.result)
+    req.onerror = () => reject(req.error)
+  })
+}
+
+async function deviceKey(): Promise<CryptoKey> {
+  const db = await openKeyDb()
+  const get = <T,>(k: string) => new Promise<T | undefined>((resolve, reject) => {
+    const r = db.transaction('keys').objectStore('keys').get(k)
+    r.onsuccess = () => resolve(r.result as T | undefined)
+    r.onerror = () => reject(r.error)
+  })
+  const existing = await get<CryptoKey>('device')
+  if (existing) return existing
+  const key = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt'])
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction('keys', 'readwrite')
+    tx.objectStore('keys').put(key, 'device')
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+  })
+  return key
+}
+
+const b64 = (b: Uint8Array) => btoa(String.fromCharCode(...b))
+const unb64 = (s: string) => Uint8Array.from(atob(s), c => c.charCodeAt(0))
+
+async function encryptKey(privKey: Hex): Promise<string> {
+  const iv = crypto.getRandomValues(new Uint8Array(12))
+  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await deviceKey(), new TextEncoder().encode(privKey))
+  return `v1.${b64(iv)}.${b64(new Uint8Array(ct))}`
+}
+
+async function decryptKey(blob: string): Promise<Hex> {
+  const [, iv, ct] = blob.split('.')
+  const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(iv) }, await deviceKey(), unb64(ct))
+  return new TextDecoder().decode(pt) as Hex
+}
+
+/** Encrypt and store a new wallet key, and keep it unlocked for this session. */
+export async function saveWallet(privKey: Hex, label: 'created' | 'imported') {
   const account = privateKeyToAccount(privKey)
-  localStorage.setItem(KEY_PRIVATE, privKey)
+  const funds = privateKeyToAccount(deriveFundsKey(privKey))
+  try {
+    localStorage.setItem(KEY_ENCRYPTED, await encryptKey(privKey))
+    localStorage.removeItem(KEY_PRIVATE_LEGACY)
+  } catch (e) {
+    // IndexedDB/WebCrypto unavailable (rare private-browsing modes): fall back so the wallet still works.
+    console.warn('[wallet] device encryption unavailable, storing key unencrypted', e)
+    localStorage.setItem(KEY_PRIVATE_LEGACY, privKey)
+  }
   localStorage.setItem(KEY_ADDRESS, account.address)
+  localStorage.setItem(KEY_FUNDS_ADDRESS, funds.address)
   localStorage.setItem(KEY_LABEL, label)
+  unlockedKey = privKey
+  notify()
   return account.address
 }
 
-export function deleteWallet() {
-  localStorage.removeItem(KEY_PRIVATE)
-  localStorage.removeItem(KEY_ADDRESS)
-  localStorage.removeItem(KEY_LABEL)
+/**
+ * Decrypt the key into memory. Call once the user has passed the PIN/biometric gate.
+ * Also upgrades wallets saved by older versions (plaintext) to encrypted storage.
+ */
+export async function unlockWallet(): Promise<boolean> {
+  if (unlockedKey) return true
+  const legacy = safeGet(KEY_PRIVATE_LEGACY) as Hex | null
+  const blob = safeGet(KEY_ENCRYPTED)
+  try {
+    if (blob) {
+      unlockedKey = await decryptKey(blob)
+    } else if (legacy) {
+      unlockedKey = legacy
+      try {
+        localStorage.setItem(KEY_ENCRYPTED, await encryptKey(legacy))
+        localStorage.removeItem(KEY_PRIVATE_LEGACY)
+      } catch { /* keep legacy storage if encryption is unavailable */ }
+    } else {
+      return false
+    }
+  } catch (e) {
+    console.error('[wallet] could not unlock wallet', e)
+    return false
+  }
+  if (!safeGet(KEY_FUNDS_ADDRESS)) {
+    localStorage.setItem(KEY_FUNDS_ADDRESS, privateKeyToAccount(deriveFundsKey(unlockedKey)).address)
+  }
+  notify()
+  return true
 }
 
+/** Forget the decrypted key (e.g. when the app locks or you sign out). */
+export function lockWallet() {
+  unlockedKey = null
+  notify()
+}
+
+export function deleteWallet() {
+  for (const k of [KEY_PRIVATE_LEGACY, KEY_ENCRYPTED, KEY_ADDRESS, KEY_FUNDS_ADDRESS, KEY_LABEL]) localStorage.removeItem(k)
+  unlockedKey = null
+  notify()
+}
+
+/** The main wallet key, or null if no wallet / not unlocked yet. */
 export function getPrivateKey(): Hex | null {
-  return localStorage.getItem(KEY_PRIVATE) as Hex | null
+  return unlockedKey
+}
+
+/** The trading (Funds) account key, or null if not unlocked. */
+export function getFundsPrivateKey(): Hex | null {
+  return unlockedKey ? deriveFundsKey(unlockedKey) : null
 }
 
 // ---- Key derivation ---------------------------------------------------------

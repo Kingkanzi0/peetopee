@@ -9,6 +9,22 @@ services:
         value: 7860
       - key: DB_PATH
         value: /app/data/peetopee.db
+      # TESTNET SETTINGS — change both before real users join:
+      #  OTP_DEMO=1 shows the sign-in code in the app instead of emailing it.
+      #  Set RESEND_API_KEY (and OTP_FROM_EMAIL) and remove OTP_DEMO to email real codes.
+      - key: OTP_DEMO
+        value: "1"
+      #  KYC_AUTO_APPROVE=1 approves every ID submission automatically.
+      #  Remove it to review submissions yourself on the admin page (#admin).
+      - key: KYC_AUTO_APPROVE
+        value: "1"
+      - key: RESEND_API_KEY
+        sync: false
+      - key: OTP_FROM_EMAIL
+        sync: false
+      # Secret for the ID review page. Render generates it; copy it from the dashboard.
+      - key: ADMIN_TOKEN
+        generateValue: true
     disk:
       name: peetopee-data
       mountPath: /app/data

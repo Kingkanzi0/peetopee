@@ -10,3 +10,11 @@ contracts/out/
 contracts/cache/
 contracts/broadcast/
 .forge-snapshots/
+
+# Arc Studio debug logs (may contain emails / codes) — never commit
+console.jsonl
+traces.jsonl
+
+# server data
+data/
+server/node_modules/

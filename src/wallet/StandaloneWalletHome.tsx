@@ -12,8 +12,10 @@ import {
 import { isAddress, type Address } from 'viem'
 import {
   STANDALONE_CHAINS, CHAIN_TOKENS, fetchTokenBalance, sendToken,
-  getPrivateKey, type StoredWallet, type TokenBalance, type WalletChainConfig,
+  getPrivateKey, loadStoredWallet, type StoredWallet, type TokenBalance, type WalletChainConfig,
 } from './standaloneWallet'
+import { recordTx, shortAddr } from '../history/txHistory'
+import { friendlyTxError } from './appWallet'
 import { useTokenPrices } from './useTokenPrices'
 import { QRCodeSVG } from 'qrcode.react'
 
@@ -447,16 +449,21 @@ function SendSheet({
     if (!isAddress(to)) { setErrMsg('Invalid address'); return }
     if (!amount || parseFloat(amount) <= 0) { setErrMsg('Enter a valid amount'); return }
     const pk = getPrivateKey()
-    if (!pk) { setErrMsg('No wallet found'); return }
+    if (!pk) { setErrMsg('Unlock Peetopee with your PIN to send.'); return }
     setErrMsg('')
     setStep('sending')
     try {
       const hash = await sendToken(pk, selectedChain.id, selectedToken, to, amount)
       setTxHash(hash)
+      if (selectedChain.id === 5042002 && selectedToken.symbol === 'USDC') {
+        const own = loadStoredWallet()
+        const isFunds = own && to.toLowerCase() === own.fundsAddress.toLowerCase()
+        recordTx({ hash, chainId: 5042002, kind: isFunds ? 'to_funds' : 'sent', amount, counterparty: isFunds ? 'Funds' : shortAddr(to) })
+      }
       setStep('done')
       setTimeout(onSent, 3000)
     } catch (e) {
-      setErrMsg(e instanceof Error ? e.message.slice(0, 120) : 'Transaction failed')
+      setErrMsg(friendlyTxError(e))
       setStep('error')
     }
   }

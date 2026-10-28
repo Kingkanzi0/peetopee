@@ -1,66 +1,42 @@
 /**
- * otpService — demo OTP for Peetopee registration.
+ * otpService — sign-in codes, issued and checked by the Peetopee server.
  *
- * In production you would call a real SMS/email provider (Twilio, AWS SES,
- * Resend, etc.) from a backend. This demo version generates a 6-digit code,
- * stores it in memory with a 10-minute expiry, and logs it to the console so
- * you can see it during testing. The app shows a banner with the code for
- * demo convenience.
+ * The server emails the code (when RESEND_API_KEY is set). On test servers
+ * running with OTP_DEMO=1 it also returns the code so the app can show it in
+ * a banner. Verifying a code stores a session token (see ptpApi.ts).
  */
-
-interface OtpRecord {
-  code: string
-  target: string
-  expiresAt: number
-}
-
-// In-memory store — clears on page reload (intentional for demo)
-const store = new Map<string, OtpRecord>()
-
-const OTP_TTL_MS = 10 * 60 * 1000 // 10 minutes
-
-function generateCode(): string {
-  return String(Math.floor(100000 + Math.random() * 900000))
-}
+import { apiRequestOtp, apiVerifyOtp, ApiError, type PtpApiUser } from './ptpApi'
 
 export interface OtpSendResult {
-  success: boolean
-  /** demo-only: the actual code so we can show it in a banner */
-  demoCode: string
+  ok: boolean
+  error?: string
+  /** Seconds until the code expires. */
+  expiresIn: number
+  /** Only present on test servers (OTP_DEMO=1). */
+  demoCode?: string
 }
 
-/**
- * Send (or resend) a 6-digit OTP to the given target (email or phone).
- * Returns the code in demoCode for the in-app banner. In production,
- * drop demoCode and call a real provider instead.
- */
-export function sendOtp(target: string): OtpSendResult {
-  const code = generateCode()
-  const key = target.toLowerCase().trim()
-  store.set(key, { code, target: key, expiresAt: Date.now() + OTP_TTL_MS })
-  console.log(`[Peetopee OTP] ${target} → ${code}`)
-  return { success: true, demoCode: code }
+export async function sendOtp(target: string): Promise<OtpSendResult> {
+  try {
+    const res = await apiRequestOtp(target.trim())
+    return { ok: true, expiresIn: res.expiresIn, demoCode: res.demoCode }
+  } catch (e) {
+    return { ok: false, expiresIn: 0, error: e instanceof ApiError ? e.message : 'Could not send the code.' }
+  }
 }
 
-/**
- * Verify a code entered by the user.
- * Returns true if the code matches and hasn't expired.
- * Deletes the record on first successful verify (single-use).
- */
-export function verifyOtp(target: string, code: string): boolean {
-  const key = target.toLowerCase().trim()
-  const record = store.get(key)
-  if (!record) return false
-  if (Date.now() > record.expiresAt) { store.delete(key); return false }
-  if (record.code !== code.trim()) return false
-  store.delete(key)
-  return true
+export interface OtpVerifyResult {
+  ok: boolean
+  error?: string
+  /** The existing server profile when this contact has signed in before. */
+  profile?: PtpApiUser | null
 }
 
-/** How many seconds until the OTP expires (0 if not found or already expired) */
-export function otpSecondsLeft(target: string): number {
-  const key = target.toLowerCase().trim()
-  const record = store.get(key)
-  if (!record) return 0
-  return Math.max(0, Math.floor((record.expiresAt - Date.now()) / 1000))
+export async function verifyOtp(target: string, code: string): Promise<OtpVerifyResult> {
+  try {
+    const res = await apiVerifyOtp(target.trim(), code.trim())
+    return { ok: true, profile: res.profile }
+  } catch (e) {
+    return { ok: false, error: e instanceof ApiError ? e.message : 'Could not check the code.' }
+  }
 }

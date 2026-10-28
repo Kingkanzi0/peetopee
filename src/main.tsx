@@ -17,16 +17,11 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { WagmiProvider } from 'wagmi'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { ConnectKitProvider } from 'connectkit'
 import { Toaster } from 'sonner'
 import { config } from './config'
-import { seedDemoUsers } from './auth/peetopeeId'
 import App from './App'
 import { AuthProvider } from './auth/AuthContext'
 import './index.css'
-
-// Seed demo users so Peetopee ID lookups work out of the box
-seedDemoUsers()
 
 const queryClient = new QueryClient()
 
@@ -73,34 +68,14 @@ const StudioWatermark = () => (
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <WagmiProvider config={config}>
+    {/* Only the built-in Peetopee wallet is used; App connects it after the PIN unlock. */}
+    <WagmiProvider config={config} reconnectOnMount={false}>
       <QueryClientProvider client={queryClient}>
-        <ConnectKitProvider
-          options={{
-            walletConnectCTA: 'both',       // show QR + deep-link button
-            enforceSupportedChains: false,  // don't block Arc Testnet
-            initialChainId: 5042002,        // default to Arc Testnet
-            language: 'en-US',
-            disclaimer: 'By connecting your wallet you agree to the Peetopee Terms of Service.',
-          }}
-          customTheme={{
-            '--ck-connectbutton-background': '#122d45',
-            '--ck-connectbutton-color': '#ffffff',
-            '--ck-connectbutton-hover-background': '#1a4d7a',
-            '--ck-connectbutton-border-radius': '16px',
-            '--ck-accent-color': '#1A6FE8',
-            '--ck-accent-text-color': '#ffffff',
-            '--ck-modal-heading-font-variant': 'normal',
-            '--ck-border-radius': '20px',
-            '--ck-overlay-background': 'rgba(0,0,0,0.7)',
-          }}
-        >
-          <AuthProvider>
-            <App />
-          </AuthProvider>
-          <StudioWatermark />
-          <Toaster position="top-center" />
-        </ConnectKitProvider>
+        <AuthProvider>
+          <App />
+        </AuthProvider>
+        <StudioWatermark />
+        <Toaster position="top-center" />
       </QueryClientProvider>
     </WagmiProvider>
   </StrictMode>,

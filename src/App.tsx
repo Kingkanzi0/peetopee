@@ -1,5 +1,5 @@
-import { useState, useCallback } from 'react'
-import { useAccount } from 'wagmi'
+import { useState, useCallback, useEffect } from 'react'
+import { useAccount, useConnect, useConnectors } from 'wagmi'
 import { ShoppingBag, LayoutDashboard, Wallet, Banknote, Send } from 'lucide-react'
 import { WalletBar } from './components/WalletBar'
 import { TraderList } from './components/TraderList'
@@ -20,6 +20,11 @@ import { ProfileScreen } from './components/ProfileScreen'
 import { useTradeNotifications } from './hooks/useTradeNotifications'
 import { useWalletLink } from './hooks/useWalletLink'
 import type { CountryDef, TraderProfile } from './contracts/peetopee'
+import { AdminKyc } from './components/AdminKyc'
+import { useVisitingCountry } from './components/FundsScreen'
+import { useAppWallet } from './wallet/appWallet'
+import { unlockWallet, lockWallet } from './wallet/standaloneWallet'
+import { PEETOPEE_CONNECTOR_ID } from './wallet/peetopeeConnector'
 
 type Screen =
   | { id: 'market' }
@@ -30,23 +35,59 @@ type Screen =
 type Tab = 'market' | 'send' | 'funds' | 'wallet' | 'trader'
 
 export default function App() {
-  const { address } = useAccount()
   const { profile } = useAuth()
-
   const [splashDone, setSplashDone] = useState(false)
+  const [admin, setAdmin] = useState(() => window.location.hash === '#admin')
+  const onSplashDone = useCallback(() => setSplashDone(true), [])
+
+  useEffect(() => {
+    const onHash = () => setAdmin(window.location.hash === '#admin')
+    window.addEventListener('hashchange', onHash)
+    return () => window.removeEventListener('hashchange', onHash)
+  }, [])
+
+  // Forget the decrypted wallet key when the user signs out.
+  useEffect(() => { if (!profile) lockWallet() }, [profile])
+
+  if (admin) return <AdminKyc onExit={() => { window.location.hash = ''; setAdmin(false) }} />
+  if (!splashDone) return <SplashScreen onDone={onSplashDone} />
+  if (!profile) return <OnboardingFlow />
+
+  return (
+    <PinGate userName={profile.name}>
+      <MainApp />
+    </PinGate>
+  )
+}
+
+/** Everything after the PIN/biometric unlock. */
+function MainApp() {
+  const { address, isConnected } = useAccount()
+  const { connect } = useConnect()
+  const connectors = useConnectors()
+  const { wallet, unlocked } = useAppWallet()
+  const [visiting] = useVisitingCountry()
+
+  // Unlock the built-in wallet now that the user has passed the PIN gate…
+  useEffect(() => { void unlockWallet() }, [])
+  // …and use it (its Funds account) for all Market and Trader actions.
+  useEffect(() => {
+    if (!wallet || !unlocked || isConnected) return
+    const connector = connectors.find(c => c.id === PEETOPEE_CONNECTOR_ID)
+    if (connector) connect({ connector })
+  }, [wallet, unlocked, isConnected, connectors, connect])
+
   const [showProfile, setShowProfile] = useState(false)
   const [tab, setTab] = useState<Tab>('market')
   const [screen, setScreen] = useState<Screen>({ id: 'market' })
   const [openTraderRegister, setOpenTraderRegister] = useState(false)
 
   useTradeNotifications(address)
-  useWalletLink() // auto-links connected wallet address to the user's Peetopee ID
+  useWalletLink() // registers the built-in wallet's addresses with your Peetopee ID (automatic)
 
   const [chatOpen, setChatOpen] = useState(false)
   const [chatTradeId, setChatTradeId] = useState<bigint | null>(null)
   const [chatCounterparty, setChatCounterparty] = useState('')
-
-  const onSplashDone = useCallback(() => setSplashDone(true), [])
 
   function goToTrade(tradeId: bigint, counterparty?: string) {
     setScreen({ id: 'trade', tradeId })
@@ -57,11 +98,12 @@ export default function App() {
     setTab('market')
   }
 
-  if (!splashDone) return <SplashScreen onDone={onSplashDone} />
-  if (!profile) return <OnboardingFlow />
+  function openTraders(country: CountryDef) {
+    setScreen({ id: 'traders', country })
+    setTab('market')
+  }
 
   return (
-    <PinGate userName={profile.name}>
       <div className="min-h-dvh" style={{ background: 'var(--bg-gradient)' }}>
         {showProfile && <ProfileScreen onBack={() => setShowProfile(false)} />}
         {!showProfile && <WalletBar onProfileOpen={() => setShowProfile(true)} />}
@@ -100,6 +142,7 @@ export default function App() {
                   trader={screen.trader}
                   onBack={() => setScreen({ id: 'traders', country: screen.country })}
                   onTradeCreated={id => goToTrade(id, screen.trader.traderAddr)}
+                  onAddFunds={() => setTab('funds')}
                 />
               )}
               {screen.id === 'trade' && (
@@ -123,10 +166,12 @@ export default function App() {
           )}
 
           {/* SEND TAB */}
-          {tab === 'send' && <SendScreen />}
+          {tab === 'send' && (
+            <SendScreen onPayBank={() => { if (visiting) openTraders(visiting); else { setScreen({ id: 'market' }); setTab('market') } }} />
+          )}
 
           {/* FUNDS TAB */}
-          {tab === 'funds' && <FundsScreen />}
+          {tab === 'funds' && <FundsScreen onSell={openTraders} onOpenWallet={() => setTab('wallet')} />}
 
           {/* WALLET TAB */}
           {tab === 'wallet' && <WalletTab onBack={() => setTab('market')} />}
@@ -137,6 +182,7 @@ export default function App() {
               onTradeClick={id => goToTrade(id)}
               openRegister={openTraderRegister}
               onRegisterOpened={() => setOpenTraderRegister(false)}
+              onOpenWallet={() => setTab('wallet')}
             />
           )}
         </main>
@@ -169,7 +215,6 @@ export default function App() {
           />
         )}
       </div>
-    </PinGate>
   )
 }
 

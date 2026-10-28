@@ -1,199 +1,263 @@
-import { useState, useEffect } from 'react'
-import { useAccount, useReadContract } from 'wagmi'
-import { erc20Abi } from 'viem'
-import { ArrowDownLeft, ArrowUpRight, RefreshCw, Wallet2, TrendingUp } from 'lucide-react'
-import { USDC_ADDRESS, ARC_TESTNET_CHAIN_ID } from '../contracts/peetopee'
-import { Amount, usdcDecimalsFor } from '../onchain-money'
-import { getBalances, getTransactions, type LedgerTx } from '../auth/localLedger'
-import { useLocalCurrency } from '../hooks/useLocalCurrency'
+/**
+ * FundsScreen — your money at a glance.
+ *
+ *   Funds balance  — USDC in your trading account. Selling in the Market uses this.
+ *   Wallet balance — USDC in your main wallet (where Peetopee ID payments arrive).
+ *
+ * Both are shown in USDC and in the currency of the country you're visiting.
+ * To sell, move USDC Wallet → Funds first.
+ */
+import { useEffect, useState } from 'react'
+import type { Address } from 'viem'
+import {
+  ArrowDownToLine, ArrowUpFromLine, Loader2, MapPin, ShoppingBag, Wallet2, Briefcase, X, CheckCircle2,
+} from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
-import { getMyPtpId } from '../auth/peetopeeId'
+import { COUNTRIES, getCountryByCode, type CountryDef } from '../contracts/peetopee'
+import { useLocalCurrency } from '../hooks/useLocalCurrency'
+import {
+  useAppWallet, useUsdcBalance, maxSendable, sendUsdcOnArc, waitForArcTx, friendlyTxError, GAS_RESERVE_USDC,
+} from '../wallet/appWallet'
+import { recordTx, updateTxStatus } from '../history/txHistory'
+import { TransactionHistory } from './TransactionHistory'
 
-const CURRENCY_SYMBOLS: Record<string, string> = {
-  NGN: '₦', VND: '₫', EUR: '€', USD: '$', GHS: '₵', KES: 'KSh', GBP: '£',
-}
+const VISITING_KEY = 'ptp_visiting_country'
 
-function TxRow({ tx }: { tx: LedgerTx }) {
-  const isCredit = tx.amount > 0
-  const sym = CURRENCY_SYMBOLS[tx.currency] ?? tx.currency + ' '
-  return (
-    <div className="flex items-center gap-3 py-3 border-b last:border-0" style={{ borderColor: 'var(--border)' }}>
-      <div
-        className="size-9 rounded-xl flex items-center justify-center shrink-0"
-        style={{ background: isCredit ? 'rgba(22,163,74,0.1)' : 'rgba(186,43,76,0.1)' }}
-      >
-        {isCredit
-          ? <ArrowDownLeft className="size-4 text-green-600" />
-          : <ArrowUpRight className="size-4 text-red-600" />
-        }
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className="text-sm font-medium truncate" style={{ color: 'var(--ink)' }}>{tx.description}</div>
-        <div className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>
-          {new Date(tx.timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-        </div>
-      </div>
-      <div
-        className="text-sm font-bold shrink-0"
-        style={{ color: isCredit ? '#16a34a' : 'var(--danger)' }}
-      >
-        {isCredit ? '+' : ''}{sym}{Math.abs(tx.amount).toLocaleString()}
-      </div>
-    </div>
-  )
-}
-
-export function FundsScreen() {
-  const { address } = useAccount()
+/** The country you're in right now (defaults to your home country). Shared across screens. */
+export function useVisitingCountry(): [CountryDef | undefined, (c: CountryDef) => void] {
   const { profile } = useAuth()
-  const [localBalances, setLocalBalances] = useState(getBalances())
-  const [txHistory, setTxHistory] = useState(getTransactions())
-  const [selectedCurrency, setSelectedCurrency] = useState<string | null>(null)
-  const ptpId = getMyPtpId()
+  const read = () => { try { return localStorage.getItem(VISITING_KEY) } catch { return null } }
+  const [code, setCode] = useState<string | null>(read)
+  useEffect(() => {
+    const sync = () => setCode(read())
+    window.addEventListener('ptp-visiting-changed', sync)
+    return () => window.removeEventListener('ptp-visiting-changed', sync)
+  }, [])
+  const country = (code && getCountryByCode(code)) || profile?.country
+  function set(c: CountryDef) {
+    try { localStorage.setItem(VISITING_KEY, c.code) } catch { /* ignore */ }
+    setCode(c.code)
+    window.dispatchEvent(new Event('ptp-visiting-changed'))
+  }
+  return [country, set]
+}
 
-  const { data: rawUsdc } = useReadContract({
-    address: USDC_ADDRESS,
-    abi: erc20Abi,
-    functionName: 'balanceOf',
-    args: address ? [address] : undefined,
-    chainId: ARC_TESTNET_CHAIN_ID,
-    query: { enabled: !!address, refetchInterval: 30_000 },
-  })
+function formatLocal(amount: number, c: CountryDef) {
+  const digits = amount >= 1000 ? 0 : 2
+  return `${c.currencySymbol}${amount.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits })}`
+}
 
-  const usdcFormatted = rawUsdc != null
-    ? Amount.fromRaw(rawUsdc, usdcDecimalsFor(ARC_TESTNET_CHAIN_ID)).toFixed(2)
-    : null
+interface Props {
+  onSell: (country: CountryDef) => void
+  onOpenWallet: () => void
+}
 
-  const { rate: fxRate } = useLocalCurrency(profile?.country?.currency ?? 'NGN')
+export function FundsScreen({ onSell, onOpenWallet }: Props) {
+  const { profile } = useAuth()
+  const { wallet, unlocked } = useAppWallet()
+  const [visiting, setVisiting] = useVisitingCountry()
+  const { rate, source } = useLocalCurrency(visiting?.currency ?? 'USD')
+  const funds = useUsdcBalance(wallet?.fundsAddress)
+  const main = useUsdcBalance(wallet?.address)
+  const [move, setMove] = useState<'to_funds' | 'from_funds' | null>(null)
 
-  function refresh() {
-    setLocalBalances(getBalances())
-    setTxHistory(getTransactions())
+  if (!wallet) {
+    return (
+      <div className="max-w-lg mx-auto px-4 pt-10 pb-8 text-center">
+        <Wallet2 className="size-10 mx-auto mb-3 opacity-40" style={{ color: 'var(--ink)' }} />
+        <h1 className="text-xl font-bold mb-1 display" style={{ color: 'var(--ink)' }}>Set up your wallet</h1>
+        <p className="text-sm mb-5" style={{ color: 'var(--muted)' }}>Create or import a Peetopee wallet to hold USDC and trade.</p>
+        <button onClick={onOpenWallet} className="rounded-2xl py-3.5 px-8 text-sm font-bold text-white" style={{ background: 'var(--accent)' }}>
+          Go to Wallet
+        </button>
+      </div>
+    )
   }
 
-  // Initialize from localStorage on mount (deferred to avoid setState-in-effect lint)
-  useEffect(() => {
-    const t = setTimeout(refresh, 0)
-    return () => clearTimeout(t)
-  }, [])
-
-  const displayTx = selectedCurrency
-    ? getTransactions(selectedCurrency)
-    : txHistory
+  const local = (usdc: number | null) => (usdc != null && rate != null && visiting ? formatLocal(usdc * rate, visiting) : '—')
 
   return (
     <div className="max-w-lg mx-auto px-4 pt-4 pb-8">
       {/* Header */}
-      <div className="flex items-center justify-between mb-5">
+      <div className="flex items-start justify-between mb-4 gap-3">
         <div>
-          <h1 className="text-xl font-bold" style={{ color: 'var(--ink)', fontFamily: "'Space Grotesk', sans-serif", letterSpacing: '-0.02em' }}>Funds</h1>
-          {ptpId && <div className="text-xs mt-0.5 font-mono" style={{ color: 'var(--muted)' }}>{ptpId}</div>}
+          <h1 className="text-xl font-bold display" style={{ color: 'var(--ink)', letterSpacing: '-0.02em' }}>Funds</h1>
+          {profile?.ptpId && <div className="text-xs mt-0.5 font-mono" style={{ color: 'var(--muted)' }}>{profile.ptpId}</div>}
         </div>
-        <button onClick={refresh} className="p-2 rounded-xl active:bg-gray-100">
-          <RefreshCw className="size-4" style={{ color: 'var(--muted)' }} />
+        <label className="flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-xs font-semibold"
+          style={{ background: 'var(--surface-muted)', border: '1px solid var(--border)', color: 'var(--ink)' }}>
+          <MapPin className="size-3.5" style={{ color: 'var(--accent)' }} />
+          <span className="sr-only">Country you're in</span>
+          <select
+            value={visiting?.code ?? ''}
+            onChange={e => { const c = getCountryByCode(e.target.value); if (c) setVisiting(c) }}
+            className="bg-transparent outline-none"
+            style={{ fontSize: 16, maxWidth: 140 }}
+          >
+            {COUNTRIES.map(c => <option key={c.code} value={c.code}>{c.flag} {c.name}</option>)}
+          </select>
+        </label>
+      </div>
+
+      {/* Funds (trading) card */}
+      <div className="rounded-2xl p-5 mb-3" style={{ background: 'linear-gradient(135deg, #0f2557 0%, #1d4ed8 100%)' }}>
+        <div className="flex items-center gap-2 mb-1">
+          <Briefcase className="size-4 text-white/60" />
+          <span className="text-xs text-white/70 font-medium">Funds balance · used for selling</span>
+        </div>
+        <div className="text-3xl font-bold text-white tabular-nums">
+          {funds.balance == null ? '—' : funds.balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          <span className="text-base font-semibold text-white/70"> USDC</span>
+        </div>
+        <div className="text-sm text-white/70 mt-0.5 tabular-nums">
+          ≈ {local(funds.balance)} {visiting?.currency}
+        </div>
+        <div className="grid grid-cols-2 gap-2 mt-4">
+          <button onClick={() => setMove('to_funds')} disabled={!unlocked}
+            className="rounded-xl py-2.5 text-sm font-semibold flex items-center justify-center gap-1.5 disabled:opacity-50"
+            style={{ background: 'white', color: '#0f2557' }}>
+            <ArrowDownToLine className="size-4" /> Add to Funds
+          </button>
+          <button onClick={() => visiting && onSell(visiting)} disabled={!visiting}
+            className="rounded-xl py-2.5 text-sm font-semibold flex items-center justify-center gap-1.5 disabled:opacity-50"
+            style={{ background: 'rgba(255,255,255,0.15)', color: 'white' }}>
+            <ShoppingBag className="size-4" /> Sell for {visiting?.currency}
+          </button>
+        </div>
+      </div>
+
+      {/* Wallet card */}
+      <div className="rounded-2xl p-4 mb-5 flex items-center gap-3" style={{ background: 'var(--surface-strong)', border: '1.5px solid var(--border)' }}>
+        <div className="size-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: 'rgba(29,78,216,0.1)' }}>
+          <Wallet2 className="size-5 text-blue-700" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="text-xs" style={{ color: 'var(--muted)' }}>Wallet balance</div>
+          <div className="text-base font-bold tabular-nums" style={{ color: 'var(--ink)' }}>
+            {main.balance == null ? '—' : main.balance.toFixed(2)} USDC
+            <span className="text-xs font-medium ml-1.5" style={{ color: 'var(--muted)' }}>≈ {local(main.balance)}</span>
+          </div>
+        </div>
+        <button onClick={() => setMove('from_funds')} disabled={!unlocked || !funds.balance}
+          className="text-xs font-semibold rounded-xl px-3 py-2 flex items-center gap-1 disabled:opacity-40"
+          style={{ background: 'var(--surface-muted)', color: 'var(--ink)' }}>
+          <ArrowUpFromLine className="size-3.5" /> From Funds
         </button>
       </div>
 
-      {/* USDC balance card */}
-      <div
-        className="rounded-2xl p-5 mb-4"
-        style={{ background: 'linear-gradient(135deg, #0f2557 0%, #1d4ed8 100%)' }}
-      >
-        <div className="flex items-center gap-2 mb-1">
-          <Wallet2 className="size-4 text-white/60" />
-          <span className="text-xs text-white/60 font-medium">USDC Balance (Arc Testnet)</span>
+      {rate != null && visiting && visiting.currency !== 'USD' && (
+        <p className="text-xs -mt-3 mb-5 px-1" style={{ color: 'var(--subtle)' }}>
+          1 USDC ≈ {formatLocal(rate, visiting)} · {source === 'live' ? 'live rate' : 'approximate rate'}. Traders set their own rates.
+        </p>
+      )}
+
+      <TransactionHistory />
+
+      {move && (
+        <MoveSheet
+          direction={move}
+          walletAddress={wallet.address}
+          fundsAddress={wallet.fundsAddress}
+          available={move === 'to_funds' ? main.balance : funds.balance}
+          onClose={() => setMove(null)}
+          onDone={() => { funds.refresh(); main.refresh() }}
+        />
+      )}
+    </div>
+  )
+}
+
+function MoveSheet({ direction, walletAddress, fundsAddress, available, onClose, onDone }: {
+  direction: 'to_funds' | 'from_funds'
+  walletAddress: Address
+  fundsAddress: Address
+  available: number | null
+  onClose: () => void
+  onDone: () => void
+}) {
+  const [amount, setAmount] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const [done, setDone] = useState(false)
+  const amountNum = parseFloat(amount) || 0
+  const max = maxSendable(available)
+  const toFunds = direction === 'to_funds'
+
+  async function submit() {
+    if (amountNum <= 0 || amountNum > max) return
+    setBusy(true)
+    setErr('')
+    let hash: `0x${string}` | null = null
+    try {
+      const sent = await sendUsdcOnArc(toFunds ? 'wallet' : 'funds', toFunds ? fundsAddress : walletAddress, amountNum.toFixed(6))
+      hash = sent
+      recordTx({ hash: sent, chainId: 5042002, kind: direction, amount: String(amountNum), counterparty: toFunds ? 'Funds' : 'Wallet' })
+      await waitForArcTx(sent)
+      updateTxStatus(sent, 'confirmed')
+      setDone(true)
+      onDone()
+    } catch (e) {
+      if (hash) updateTxStatus(hash, 'failed')
+      setErr(friendlyTxError(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col justify-end" style={{ background: 'rgba(0,0,0,0.4)' }} onClick={busy ? undefined : onClose}>
+      <div className="rounded-t-3xl p-6 space-y-4 max-w-lg w-full mx-auto" style={{ background: 'var(--bg, white)', paddingBottom: 'calc(1.5rem + env(safe-area-inset-bottom, 0px))' }}
+        onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-bold display" style={{ color: 'var(--ink)' }}>{toFunds ? 'Add to Funds' : 'Move to Wallet'}</h2>
+          <button onClick={onClose} disabled={busy} className="rounded-full p-1.5" style={{ background: 'var(--surface-muted)' }} aria-label="Close">
+            <X className="size-5" style={{ color: 'var(--ink)' }} />
+          </button>
         </div>
-        <div className="text-3xl font-bold text-white mb-1">
-          ${usdcFormatted ?? '—'}
-        </div>
-        {fxRate && usdcFormatted && (
-          <div className="text-sm text-white/60">
-            ≈ {profile?.country?.currencySymbol}{(parseFloat(usdcFormatted) * fxRate).toLocaleString(undefined, { maximumFractionDigits: 0 })} {profile?.country?.currency}
+
+        {done ? (
+          <div className="text-center py-6">
+            <CheckCircle2 className="size-12 mx-auto mb-3 text-green-500" />
+            <p className="font-semibold" style={{ color: 'var(--ink)' }}>
+              {amountNum} USDC moved to {toFunds ? 'Funds' : 'Wallet'}
+            </p>
+            <button onClick={onClose} className="mt-5 rounded-2xl py-3 px-8 text-sm font-bold text-white" style={{ background: 'var(--accent)' }}>Done</button>
           </div>
-        )}
-        {!address && (
-          <div className="text-xs text-white/50 mt-1">Connect wallet to see balance</div>
+        ) : (
+          <>
+            <p className="text-sm" style={{ color: 'var(--muted)' }}>
+              {toFunds
+                ? 'Move USDC from your Wallet into Funds so you can sell it in the Market.'
+                : 'Move USDC from Funds back to your Wallet.'}
+            </p>
+            <div>
+              <div className="flex justify-between mb-1.5">
+                <label className="text-xs font-semibold" style={{ color: 'var(--subtle)' }}>AMOUNT (USDC)</label>
+                <button className="text-xs font-semibold" style={{ color: 'var(--accent)' }} onClick={() => setAmount(String(max))}>
+                  Available {available == null ? '…' : available.toFixed(2)} · Max
+                </button>
+              </div>
+              <input
+                inputMode="decimal" placeholder="0.00" value={amount} autoFocus
+                onChange={e => { const v = e.target.value.replace(/[^0-9.]/g, ''); if (/^\d*\.?\d{0,6}$/.test(v)) setAmount(v) }}
+                className="w-full rounded-2xl px-4 py-4 font-black outline-none text-center"
+                style={{ background: 'var(--surface-muted)', border: `1.5px solid ${amountNum > max ? 'var(--danger)' : 'var(--border)'}`, color: 'var(--ink)', fontSize: 24 }}
+              />
+              {amountNum > max && (
+                <p className="text-xs mt-1.5 text-center" style={{ color: 'var(--danger)' }}>
+                  Max {max} USDC — we keep {GAS_RESERVE_USDC} USDC for the network fee.
+                </p>
+              )}
+            </div>
+            {err && <p className="text-xs text-center" style={{ color: 'var(--danger)' }}>{err}</p>}
+            <button onClick={() => { void submit() }} disabled={busy || amountNum <= 0 || amountNum > max}
+              className="w-full rounded-2xl py-4 text-sm font-bold text-white flex items-center justify-center gap-2 disabled:opacity-40"
+              style={{ background: 'var(--accent)' }}>
+              {busy ? <><Loader2 className="size-4 animate-spin" /> Moving…</> : `Move ${amountNum || ''} USDC`}
+            </button>
+          </>
         )}
       </div>
-
-      {/* Local currency wallets */}
-      {localBalances.length > 0 ? (
-        <div className="mb-5">
-          <div className="text-xs font-semibold mb-3 uppercase tracking-wider" style={{ color: 'var(--subtle)' }}>
-            Local Currency Wallets
-          </div>
-          <div className="space-y-2">
-            {localBalances.map(b => {
-              const sym = CURRENCY_SYMBOLS[b.currency] ?? b.currency + ' '
-              const isSelected = selectedCurrency === b.currency
-              return (
-                <button
-                  key={b.currency}
-                  onClick={() => setSelectedCurrency(isSelected ? null : b.currency)}
-                  className="w-full rounded-2xl px-4 py-3.5 flex items-center gap-3 transition-all text-left active:scale-[0.99]"
-                  style={{
-                    background: isSelected ? 'var(--accent)' : 'var(--surface-strong)',
-                    border: `1.5px solid ${isSelected ? 'var(--accent)' : 'var(--border)'}`,
-                  }}
-                >
-                  <div
-                    className="size-9 rounded-xl flex items-center justify-center text-sm font-bold text-white shrink-0"
-                    style={{ background: isSelected ? 'rgba(255,255,255,0.2)' : '#1d4ed8' }}
-                  >
-                    {sym}
-                  </div>
-                  <div className="flex-1">
-                    <div className="text-sm font-semibold" style={{ color: isSelected ? 'white' : 'var(--ink)' }}>
-                      {b.currency} Wallet
-                    </div>
-                    <div className="text-xs" style={{ color: isSelected ? 'rgba(255,255,255,0.7)' : 'var(--muted)' }}>
-                      {b.transactions.length} transaction{b.transactions.length !== 1 ? 's' : ''}
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div className="font-bold text-base" style={{ color: isSelected ? 'white' : 'var(--ink)' }}>
-                      {sym}{b.balance.toLocaleString()}
-                    </div>
-                  </div>
-                </button>
-              )
-            })}
-          </div>
-        </div>
-      ) : (
-        <div
-          className="rounded-2xl px-4 py-6 mb-5 text-center"
-          style={{ background: 'var(--surface-muted)', border: '1.5px dashed var(--border)' }}
-        >
-          <TrendingUp className="size-8 mx-auto mb-2 opacity-30" style={{ color: 'var(--ink)' }} />
-          <p className="text-sm font-medium" style={{ color: 'var(--muted)' }}>No local currency wallets yet</p>
-          <p className="text-xs mt-1" style={{ color: 'var(--subtle)' }}>
-            Complete a P2P trade in the Market tab to receive local currency here.
-          </p>
-        </div>
-      )}
-
-      {/* Transaction history */}
-      {displayTx.length > 0 && (
-        <div>
-          <div className="flex items-center justify-between mb-3">
-            <div className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--subtle)' }}>
-              {selectedCurrency ? `${selectedCurrency} Transactions` : 'All Transactions'}
-            </div>
-            {selectedCurrency && (
-              <button className="text-xs" style={{ color: 'var(--accent)' }} onClick={() => setSelectedCurrency(null)}>
-                View all
-              </button>
-            )}
-          </div>
-          <div
-            className="rounded-2xl px-4"
-            style={{ background: 'var(--surface-strong)', border: '1.5px solid var(--border)' }}
-          >
-            {displayTx.slice(0, 20).map(tx => <TxRow key={tx.id} tx={tx} />)}
-          </div>
-        </div>
-      )}
     </div>
   )
 }

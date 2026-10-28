@@ -132,10 +132,11 @@ function CreateWalletScreen({
     })
   }, [mnemonic])
 
-  function create() {
+  async function create() {
     const privKey = deriveFromMnemonic(mnemonic)
-    const address = saveWallet(privKey, 'created')
-    onCreated({ address, label: 'created' })
+    await saveWallet(privKey, 'created')
+    const saved = loadStoredWallet()
+    if (saved) onCreated(saved)
   }
 
   return (
@@ -203,7 +204,7 @@ function CreateWalletScreen({
       </label>
 
       <button
-        onClick={create}
+        onClick={() => { void create() }}
         disabled={!backed || !revealed}
         className="w-full rounded-2xl py-4 font-semibold text-white flex items-center justify-center gap-2 disabled:opacity-40 active:scale-[0.98] transition-transform"
         style={{ background: 'linear-gradient(135deg, #1A6FE8 0%, #0ea5e9 100%)' }}
@@ -227,7 +228,7 @@ function ImportWalletScreen({
   const [error, setError] = useState('')
   const [mode, setMode] = useState<'phrase' | 'key'>('phrase')
 
-  function doImport() {
+  async function doImport() {
     setError('')
     try {
       let privKey: `0x${string}`
@@ -245,8 +246,9 @@ function ImportWalletScreen({
       } else {
         privKey = deriveFromPrivateKey(input.trim())
       }
-      const address = saveWallet(privKey, 'imported')
-      onImported({ address, label: 'imported' })
+      await saveWallet(privKey, 'imported')
+      const saved = loadStoredWallet()
+      if (saved) onImported(saved)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Import failed')
     }
@@ -316,7 +318,7 @@ function ImportWalletScreen({
       </div>
 
       <button
-        onClick={doImport}
+        onClick={() => { void doImport() }}
         disabled={!input.trim()}
         className="w-full rounded-2xl py-4 font-semibold text-white flex items-center justify-center gap-2 disabled:opacity-40 active:scale-[0.98] transition-transform"
         style={{ background: 'linear-gradient(135deg, #1A6FE8 0%, #0ea5e9 100%)' }}
