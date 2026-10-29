@@ -15,6 +15,7 @@ import { AvatarPicker } from './AvatarPicker'
 import { COUNTRIES, getCountryByCode } from '../contracts/peetopee'
 import type { CountryDef } from '../contracts/peetopee'
 import { PeetopeeLogoSVG } from './PeetopeeLogoSVG'
+import { useTheme } from '../theme/theme'
 
 type Step = 'contact' | 'otp' | 'profile' | 'country'
 
@@ -199,7 +200,7 @@ export function OnboardingFlow() {
     <div className="min-h-dvh flex flex-col" style={{ background: 'var(--bg-gradient)' }}>
       {/* Logo */}
       <div className="flex justify-center pt-10 pb-2 shrink-0">
-        <PeetopeeLogoSVG size="md" variant="horizontal" on="light" />
+        <ThemedLogo />
       </div>
 
       {/* Step indicator */}
@@ -530,7 +531,7 @@ export function OnboardingFlow() {
               <div
                 className="fixed bottom-0 left-0 right-0 px-5 py-4"
                 style={{
-                  background: 'rgba(255,255,255,0.95)',
+                  background: 'var(--nav-bg)',
                   backdropFilter: 'blur(20px)',
                   borderTop: '1px solid var(--border)',
                   paddingBottom: 'calc(1rem + env(safe-area-inset-bottom, 0px))',
@@ -556,4 +557,9 @@ export function OnboardingFlow() {
       </div>
     </div>
   )
+}
+
+function ThemedLogo() {
+  const { theme } = useTheme()
+  return <PeetopeeLogoSVG size="md" variant="horizontal" on={theme} />
 }

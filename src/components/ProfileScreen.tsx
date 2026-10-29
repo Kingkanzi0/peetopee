@@ -5,13 +5,14 @@
 import { useState } from 'react'
 import {
   ChevronRight, LogOut, Globe, Bell, Shield, ChevronLeft,
-  Copy, CheckCircle2, AtSign, Share2, Edit2, X, Check,
+  Copy, CheckCircle2, AtSign, Share2, Edit2, X, Check, Palette,
 } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import { AvatarPicker } from './AvatarPicker'
 import { COUNTRIES } from '../contracts/peetopee'
 import { ApiError } from '../auth/ptpApi'
 import { KycFlow } from './KycFlow'
+import { useTheme, type ThemePref } from '../theme/theme'
 import { notifyStatus, enableNotifications, disableNotifications, type NotifyStatus } from '../notify/notify'
 
 interface ProfileScreenProps {
@@ -408,6 +409,7 @@ export function ProfileScreen({ onBack }: ProfileScreenProps) {
 
         {/* Settings */}
         <div className="rounded-3xl overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+          <AppearanceRow />
           <NotificationsRow />
           {[
             { icon: Shield, label: 'Security', sub: 'PIN and biometrics' },
@@ -473,5 +475,28 @@ function NotificationsRow() {
         <span className="absolute top-0.5 size-5 rounded-full bg-white shadow transition-all" style={{ left: status === 'on' ? 22 : 2 }} />
       </span>
     </button>
+  )
+}
+
+/** Light, dark, or follow the phone's setting. */
+function AppearanceRow() {
+  const { pref, setPref } = useTheme()
+  const options: [ThemePref, string][] = [['light', 'Light'], ['dark', 'Dark'], ['system', 'Auto']]
+  return (
+    <div className="w-full px-4 py-3.5 flex items-center gap-3" style={{ background: 'var(--surface-strong)', borderBottom: '1px solid var(--border)' }}>
+      <Palette className="size-4 shrink-0" style={{ color: 'var(--subtle)' }} />
+      <div className="flex-1 text-left">
+        <p className="text-sm font-semibold" style={{ color: 'var(--ink)' }}>Appearance</p>
+        <p className="text-xs" style={{ color: 'var(--subtle)' }}>{pref === 'system' ? 'Follows your phone' : pref === 'dark' ? 'Dark mode' : 'Light mode'}</p>
+      </div>
+      <div className="flex rounded-xl p-0.5 shrink-0" style={{ background: 'var(--surface-muted)' }}>
+        {options.map(([value, label]) => (
+          <button key={value} onClick={() => setPref(value)} className="rounded-lg px-2.5 py-1 text-xs font-semibold"
+            style={{ background: pref === value ? 'var(--chip)' : 'transparent', color: pref === value ? 'var(--ink)' : 'var(--muted)' }}>
+            {label}
+          </button>
+        ))}
+      </div>
+    </div>
   )
 }

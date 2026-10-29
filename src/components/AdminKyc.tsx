@@ -126,7 +126,7 @@ export function AdminKyc({ onExit }: { onExit: () => void }) {
             <div className="flex gap-1 mb-4 rounded-xl p-1 w-fit" style={{ background: 'var(--surface-muted)' }}>
               {(['pending', 'approved', 'rejected'] as KycStatus[]).map(s => (
                 <button key={s} onClick={() => setStatus(s)} className="rounded-lg px-3 py-1.5 text-sm font-semibold capitalize"
-                  style={{ background: status === s ? 'white' : 'transparent', color: status === s ? 'var(--ink)' : 'var(--muted)' }}>
+                  style={{ background: status === s ? 'var(--chip)' : 'transparent', color: status === s ? 'var(--ink)' : 'var(--muted)' }}>
                   {s}
                 </button>
               ))}

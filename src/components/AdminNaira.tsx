@@ -109,7 +109,7 @@ export function AdminNaira({ adminToken }: { adminToken: string }) {
   return (
     <div className="space-y-5">
       {!NAIRA_ACCOUNT_LIVE && (
-        <div className="rounded-xl p-3 text-xs" style={{ background: 'rgba(245,158,11,0.08)', color: '#92400e' }}>
+        <div className="rounded-xl p-3 text-xs" style={{ background: 'rgba(245,158,11,0.08)', color: 'var(--warn-ink)' }}>
           Users see the naira account as "Coming soon". Set NAIRA_ACCOUNT_LIVE = true in src/naira/nairaToken.ts to open it.
         </div>
       )}
@@ -197,7 +197,7 @@ function PayoutQueue({ adminToken, contract, canRefund }: { adminToken: string; 
       <div className="flex gap-1 mb-3 rounded-xl p-1 w-fit" style={{ background: 'var(--surface-muted)' }}>
         {(['processing', 'failed', 'paid'] as const).map(s => (
           <button key={s} onClick={() => setStatus(s)} className="rounded-lg px-3 py-1.5 text-sm font-semibold capitalize"
-            style={{ background: status === s ? 'white' : 'transparent', color: status === s ? 'var(--ink)' : 'var(--muted)' }}>{s}</button>
+            style={{ background: status === s ? 'var(--chip)' : 'transparent', color: status === s ? 'var(--ink)' : 'var(--muted)' }}>{s}</button>
         ))}
       </div>
       {error && <p className="text-xs mb-2" style={{ color: 'var(--danger)' }}>{error}</p>}

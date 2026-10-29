@@ -437,7 +437,7 @@ export function SendToBank({ onBack, onRouteToEscrow }: Props) {
               style={{ background: '#fff8e6', border: '1px solid #f5c842' }}
             >
               <AlertCircle className="size-4 shrink-0 mt-0.5" style={{ color: '#b45309' }} />
-              <p className="text-xs" style={{ color: '#92400e' }}>
+              <p className="text-xs" style={{ color: 'var(--warn-ink)' }}>
                 A verified local trader in {country.name} will send the fiat payment to this bank account after you lock USDC in escrow. You can dispute if payment is not received within 24 hours.
               </p>
             </div>

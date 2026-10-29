@@ -102,7 +102,7 @@ export function WalletTab({ onBack }: { onBack?: () => void }) {
         </button>
       </div>
 
-      <div className="rounded-2xl p-4 w-full text-left" style={{ background: '#f0f9ff', border: '1px solid #bae6fd' }}>
+      <div className="rounded-2xl p-4 w-full text-left" style={{ background: 'var(--info-bg)', border: '1px solid var(--info-border)' }}>
         <p className="text-xs font-semibold text-sky-800 mb-1">Testnet wallets</p>
         <p className="text-xs text-sky-700 leading-relaxed">
           This wallet operates on testnets (Arc Testnet, Base Sepolia, etc.). Use the faucet to get free test USDC after creating your wallet.
@@ -148,7 +148,7 @@ function CreateWalletScreen({
         <h2 className="text-lg font-bold display" style={{ color: 'var(--ink)' }}>Create wallet</h2>
       </div>
 
-      <div className="rounded-2xl p-4 flex gap-3" style={{ background: '#fffbeb', border: '1px solid #fcd34d' }}>
+      <div className="rounded-2xl p-4 flex gap-3" style={{ background: 'var(--warn-bg)', border: '1px solid var(--warn-border)' }}>
         <AlertTriangle className="size-4 shrink-0 text-amber-500 mt-0.5" />
         <p className="text-xs text-amber-800 leading-relaxed">
           Write down your 12-word seed phrase and store it safely offline. Anyone with these words can access your wallet. It is shown only once.
@@ -312,7 +312,7 @@ function ImportWalletScreen({
 
       {error && <p className="text-sm" style={{ color: 'var(--danger)' }}>{error}</p>}
 
-      <div className="rounded-2xl p-3 flex gap-2" style={{ background: '#fef2f2', border: '1px solid #fecaca' }}>
+      <div className="rounded-2xl p-3 flex gap-2" style={{ background: 'var(--danger-bg)', border: '1px solid var(--danger-border)' }}>
         <AlertTriangle className="size-4 shrink-0 text-red-500 mt-0.5" />
         <p className="text-xs text-red-700">Never enter your seed phrase or private key on a website you don't trust. Only import here if you trust Peetopee.</p>
       </div>

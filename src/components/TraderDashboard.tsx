@@ -87,7 +87,7 @@ export function TraderDashboard({ onTradeClick, openRegister, onRegisterOpened, 
             onClick={() => handleTabChange(t)}
             className="flex-1 rounded-lg py-2 text-sm font-semibold transition-all"
             style={{
-              background: tab === t ? 'white' : 'transparent',
+              background: tab === t ? 'var(--chip)' : 'transparent',
               color: tab === t ? 'var(--ink)' : 'var(--muted)',
               boxShadow: tab === t ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
             }}

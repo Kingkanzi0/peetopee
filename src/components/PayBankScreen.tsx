@@ -218,7 +218,7 @@ export function PayBankScreen({ initialCountry, onBack, onTradeCreated, onAddFun
         ) : localScaled === 0n ? null : quotes.length === 0 ? (
           <div className="rounded-2xl p-4 flex items-start gap-2" style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)' }}>
             <Info className="size-4 mt-0.5 shrink-0" style={{ color: '#d97706' }} />
-            <p className="text-xs" style={{ color: '#92400e' }}>
+            <p className="text-xs" style={{ color: 'var(--warn-ink)' }}>
               No trader can take this amount right now.
               {limits && ` Traders accept between ${formatUnits(limits.min, 6)} and ${formatUnits(limits.max, 6)} USDC per payment.`}
             </p>

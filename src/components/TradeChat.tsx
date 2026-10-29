@@ -54,7 +54,7 @@ export function TradeChat({ tradeId, counterpartyAddress, onClose }: Props) {
         width: '100%',
         maxWidth: 360,
         height: 400,
-        background: 'rgba(255,255,255,0.96)',
+        background: 'var(--nav-bg)',
         backdropFilter: 'blur(40px)',
         border: '1px solid var(--border)',
         boxShadow: '0 8px 40px rgba(0,0,0,0.12)',
