@@ -16,12 +16,15 @@ import { Loader2, Copy, Check, Scale } from 'lucide-react'
 import { PEETOPEE_ESCROW, PEETOPEE_ESCROW_ADDRESS, ARC_TESTNET_CHAIN_ID, IS_ESCROW_V2, TradeStatus, type Trade, type TraderProfile } from '../contracts/peetopee'
 import { adminApi, ApiError } from '../auth/ptpApi'
 import { EvidenceList } from './DisputeEvidence'
-import { friendlyTxError } from '../wallet/appWallet'
+import { friendlyTxError, useAppWallet } from '../wallet/appWallet'
 
 const MAX_SCAN = 300
 
 export function AdminDisputes({ adminToken }: { adminToken: string }) {
-  const { address } = useAccount()
+  const { address: connected } = useAccount()
+  // The Funds address is known from this device's wallet even before wagmi connects.
+  const { wallet } = useAppWallet()
+  const address = (connected ?? wallet?.fundsAddress) as `0x${string}` | undefined
   const { data: adminAddr } = useReadContract({ ...PEETOPEE_ESCROW, functionName: 'admin', chainId: ARC_TESTNET_CHAIN_ID })
   const { data: countRaw, refetch: refetchCount } = useReadContract({ ...PEETOPEE_ESCROW, functionName: 'tradeCount', chainId: ARC_TESTNET_CHAIN_ID })
   const count = Number((countRaw as bigint | undefined) ?? 0n)
@@ -56,7 +59,7 @@ export function AdminDisputes({ adminToken }: { adminToken: string }) {
 
   return (
     <div className="space-y-4">
-      <AdminAccess adminAddr={adminAddr as string | undefined} myAddr={address} />
+      <AdminAccess adminAddr={adminAddr as string | undefined} myAddr={address} hasWallet={!!wallet} />
       {isLoading && <Loader2 className="size-5 animate-spin" style={{ color: 'var(--accent)' }} />}
       {!isLoading && disputed.length === 0 && <p className="text-sm" style={{ color: 'var(--muted)' }}>No trades in dispute.</p>}
       <div className="space-y-2">
@@ -78,7 +81,7 @@ export function AdminDisputes({ adminToken }: { adminToken: string }) {
   )
 }
 
-function AdminAccess({ adminAddr, myAddr }: { adminAddr?: string; myAddr?: string }) {
+function AdminAccess({ adminAddr, myAddr, hasWallet }: { adminAddr?: string; myAddr?: string; hasWallet: boolean }) {
   const [copied, setCopied] = useState(false)
   if (!adminAddr) return null
   if (myAddr && adminAddr.toLowerCase() === myAddr.toLowerCase()) {
@@ -95,7 +98,11 @@ function AdminAccess({ adminAddr, myAddr }: { adminAddr?: string; myAddr?: strin
     <div className="rounded-xl p-3 text-xs space-y-2" style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)', color: '#92400e' }}>
       <p>
         You can review disputes, but only the escrow admin ({adminAddr.slice(0, 6)}…{adminAddr.slice(-4)}) can resolve them.
-        {myAddr ? ' To make your Peetopee Funds account the admin, paste this into Arc Studio:' : ' Unlock your Peetopee wallet to see how to become the admin.'}
+        {myAddr
+          ? ' To make your Peetopee Funds account the admin, paste this into Arc Studio:'
+          : hasWallet
+            ? ' Unlock your Peetopee wallet to see how to become the admin.'
+            : " There's no Peetopee wallet in this browser. Open this page (#admin) in the browser on the device where you use Peetopee."}
       </p>
       {prompt && (
         <div className="flex items-start gap-2">
