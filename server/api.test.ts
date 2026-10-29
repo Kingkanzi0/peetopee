@@ -6,7 +6,7 @@ import { Database } from 'bun:sqlite'
 import { secp256k1 } from '@noble/curves/secp256k1.js'
 import { keccak_256 } from '@noble/hashes/sha3.js'
 import {
-  createApi, decodeGetTrade, keccakHex, normalizeContact, recoverPersonalSign, walletLinkMessage,
+  createApi, decodeGetTrade, RpcError, keccakHex, normalizeContact, recoverPersonalSign, walletLinkMessage,
   type RpcFn, type SendCodeFn,
 } from './api'
 
@@ -56,10 +56,17 @@ function encodeTrade(t: { id: bigint; seller: string; trader: string; bankDetail
 }
 
 let chainTrades = new Map<bigint, string>()
+const NAIRA = '0x' + 'aa'.repeat(20)
+let chainPayouts = new Map<bigint, { from: string; amount: bigint; kind: number; ref: string; status: number }>()
 const fakeRpc: RpcFn = async (method, params) => {
   if (method !== 'eth_call') throw new Error('unexpected ' + method)
-  const data = (params[0] as { data: string }).data
+  const { data, to } = params[0] as { data: string; to: string }
   const id = BigInt('0x' + data.slice(10))
+  if (to.toLowerCase() === NAIRA) {
+    const p = chainPayouts.get(id)
+    if (!p) throw new RpcError(3, 'execution reverted: UnknownPayout')
+    return '0x' + [word(p.from), word(p.amount), word(BigInt(p.kind)), word(p.ref), word(BigInt(p.status)), word(1700000000n)].join('')
+  }
   return chainTrades.get(id) ?? encodeTrade({ id: 0n, seller: '0x' + '0'.repeat(40), trader: '0x' + '0'.repeat(40), bankDetails: '' })
 }
 
@@ -71,6 +78,7 @@ let sent: { contact: string; code: string }[]
 function setup(over: Partial<Parameters<typeof createApi>[0]> = {}) {
   sent = []
   chainTrades = new Map()
+  chainPayouts = new Map()
   const sendCode: SendCodeFn = async (contact, code) => { sent.push({ contact, code }) }
   api = createApi({ db: new Database(':memory:'), rpc: fakeRpc, sendCode, adminToken: 'admin-secret', ...over })
 }
@@ -126,6 +134,23 @@ describe('helpers', () => {
     expect(normalizeContact('  Ricardo@Gmail.COM ')).toBe('ricardo@gmail.com')
     expect(normalizeContact('+234 (803) 123-4567')).toBe('+2348031234567')
     expect(normalizeContact('nope')).toBe('')
+  })
+
+  test('decodes a V2 getTrade (extra feeBps field)', () => {
+    const str = Buffer.from('0xabc', 'utf8')
+    const hexStr = str.toString('hex').padEnd(64, '0')
+    const v2 = '0x' + [
+      word(32n), word(11n), word(alice.address), word(bob.address), word(5n), word(6n),
+      word(13n * 32n),             // string offset (13 head words in V2)
+      word(1n), word(1n), word(0n), word(0n), word(0n), word(0n), word(50n), // ... + feeBps
+      word(BigInt(str.length)),
+    ].join('') + hexStr
+    const t = decodeGetTrade(v2)!
+    expect(t.tradeId).toBe(11n)
+    expect(t.seller).toBe(alice.address)
+    expect(t.trader).toBe(bob.address)
+    expect(t.bankDetails).toBe('0xabc')
+    expect(t.status).toBe(1)
   })
 
   test('decodes getTrade', () => {
@@ -449,5 +474,148 @@ describe('history relay', () => {
     expect((await call('GET', '/history?address=nope')).status).toBe(400)
     setup({ fetchExplorer: async () => { throw new Error('down') } })
     expect((await call('GET', `/history?address=${alice.address}`)).status).toBe(502)
+  })
+})
+
+describe('dispute evidence', () => {
+  const photo = 'data:image/jpeg;base64,' + 'C'.repeat(500)
+
+  async function disputedTrade() {
+    const seller = await signUp('a@b.co', 'Alice', '@alice')
+    await link(seller.token, seller.ptpId, aliceFunds, 'funds')
+    const trader = await signUp('b@b.co', 'Bob', '@bob')
+    await link(trader.token, trader.ptpId, bob, 'funds')
+    const stranger = await signUp('m@b.co', 'Mallory', '@mallory')
+    await link(stranger.token, stranger.ptpId, mallory, 'funds')
+    const details = 'OPay · 0123456789 · Alice A'
+    chainTrades.set(9n, encodeTrade({ id: 9n, seller: aliceFunds.address, trader: bob.address, bankDetails: keccakHex(details), status: 3 }))
+    await call('POST', '/trade-details', { tradeId: '9', details }, auth(seller.token))
+    return { seller, trader, stranger, details }
+  }
+
+  test('both sides can add and read evidence; strangers cannot', async () => {
+    const { seller, trader, stranger } = await disputedTrade()
+    expect((await call('POST', '/trade-evidence', { tradeId: '9', text: 'No money arrived' }, auth(seller.token))).status).toBe(200)
+    expect((await call('POST', '/trade-evidence', { tradeId: '9', text: 'Receipt attached', image: photo }, auth(trader.token))).status).toBe(200)
+    expect((await call('POST', '/trade-evidence', { tradeId: '9', text: 'hi' }, auth(stranger.token))).status).toBe(403)
+    const list = await call('GET', '/trade-evidence?tradeId=9', undefined, auth(trader.token))
+    expect(list.body.evidence.map((e: any) => e.role)).toEqual(['seller', 'trader'])
+    expect(list.body.evidence[1].image).toBe(photo)
+    expect((await call('GET', '/trade-evidence?tradeId=9', undefined, auth(stranger.token))).status).toBe(403)
+  })
+
+  test('rejects empty evidence and non-image uploads', async () => {
+    const { seller } = await disputedTrade()
+    expect((await call('POST', '/trade-evidence', { tradeId: '9' }, auth(seller.token))).status).toBe(400)
+    expect((await call('POST', '/trade-evidence', { tradeId: '9', image: 'hello' }, auth(seller.token))).status).toBe(400)
+  })
+
+  test('admin sees both people, the bank details and all evidence', async () => {
+    const { seller, trader, details } = await disputedTrade()
+    await call('POST', '/trade-evidence', { tradeId: '9', text: 'No money arrived' }, auth(seller.token))
+    await call('POST', '/trade-evidence', { tradeId: '9', image: photo }, auth(trader.token))
+    expect((await call('GET', '/admin/dispute?tradeId=9')).status).toBe(403)
+    const r = await call('GET', '/admin/dispute?tradeId=9', undefined, { 'X-Admin-Token': 'admin-secret' })
+    expect(r.body.seller.ptpId).toBe('@alice')
+    expect(r.body.trader.ptpId).toBe('@bob')
+    expect(r.body.bankDetails).toBe(details)
+    expect(r.body.evidence).toHaveLength(2)
+  })
+})
+
+// ── naira account payouts ───────────────────────────────────────────────────
+
+describe('naira payouts', () => {
+  const bankDetails = JSON.stringify({ kind: 'bank', bank: 'OPay', accountNumber: '0123456789', accountName: 'Bob Obi' })
+  const dataDetails = JSON.stringify({ kind: 'data', network: 'MTN', phone: '08031234567', plan: '1GB · 30 days' })
+  const meterDetails = JSON.stringify({ kind: 'electricity', disco: 'Ikeja Electric', meterNumber: '45012345678', meterType: 'prepaid' })
+
+  async function aliceWithWallet(verifyId = true) {
+    const a = await signUp('alice@example.com', 'Alice', '@alice')
+    await link(a.token, a.ptpId, alice)
+    if (verifyId) {
+      await call('POST', '/kyc/submit', {
+        fullName: 'Alice A', idType: 'nin', idNumber: '12345678901', countryCode: 'NG',
+        idImage: 'data:image/png;base64,AAAA', selfie: 'data:image/png;base64,AAAA',
+      }, auth(a.token))
+    }
+    return a
+  }
+
+  test('config is off until a naira contract is set, then the admin can set it', async () => {
+    expect((await call('GET', '/config')).body.nairaAddress).toBeNull()
+    const a = await aliceWithWallet()
+    expect((await call('POST', '/payouts', { payoutId: '1', details: dataDetails }, auth(a.token))).status).toBe(503)
+    expect((await call('POST', '/admin/config', { nairaAddress: NAIRA })).status).toBe(403)
+    const set = await call('POST', '/admin/config', { nairaAddress: NAIRA }, { 'X-Admin-Token': 'admin-secret' })
+    expect(set.body.nairaAddress).toBe(NAIRA)
+    expect((await call('GET', '/config')).body.nairaAddress).toBe(NAIRA)
+  })
+
+  test('simulated data purchase is paid at once and listed', async () => {
+    setup({ nairaAddress: NAIRA, payoutMode: 'simulate' })
+    const a = await aliceWithWallet(false)
+    chainPayouts.set(1n, { from: alice.address, amount: 1_000_000_000n, kind: 2, ref: keccakHex(dataDetails), status: 1 })
+    const r = await call('POST', '/payouts', { payoutId: '1', details: dataDetails }, auth(a.token))
+    expect(r.status).toBe(200)
+    expect(r.body.payout.status).toBe('paid')
+    expect(r.body.payout.reference).toMatch(/^SIM-/)
+    expect(r.body.payout.details.phone).toBe('08031234567')
+    const again = await call('POST', '/payouts', { payoutId: '1', details: dataDetails }, auth(a.token))
+    expect(again.body.payout.reference).toBe(r.body.payout.reference) // idempotent
+    const mine = await call('GET', '/payouts', undefined, auth(a.token))
+    expect(mine.body.payouts).toHaveLength(1)
+  })
+
+  test('electricity gets a token when simulated', async () => {
+    setup({ nairaAddress: NAIRA, payoutMode: 'simulate' })
+    const a = await aliceWithWallet(false)
+    chainPayouts.set(2n, { from: alice.address, amount: 5_000_000_000n, kind: 3, ref: keccakHex(meterDetails), status: 1 })
+    const r = await call('POST', '/payouts', { payoutId: '2', details: meterDetails }, auth(a.token))
+    expect(r.body.payout.token).toMatch(/^\d{4}(-\d{4}){4}$/)
+  })
+
+  test('rejects details that do not match the on-chain hash, kind, or sender', async () => {
+    setup({ nairaAddress: NAIRA, payoutMode: 'simulate' })
+    const a = await aliceWithWallet()
+    chainPayouts.set(1n, { from: alice.address, amount: 1n, kind: 0, ref: keccakHex(bankDetails), status: 1 })
+    const tampered = bankDetails.replace('0123456789', '9999999999')
+    expect((await call('POST', '/payouts', { payoutId: '1', details: tampered }, auth(a.token))).status).toBe(400)
+    chainPayouts.set(2n, { from: alice.address, amount: 1n, kind: 1, ref: keccakHex(bankDetails), status: 1 })
+    expect((await call('POST', '/payouts', { payoutId: '2', details: bankDetails }, auth(a.token))).status).toBe(400)
+    chainPayouts.set(3n, { from: mallory.address, amount: 1n, kind: 0, ref: keccakHex(bankDetails), status: 1 })
+    expect((await call('POST', '/payouts', { payoutId: '3', details: bankDetails }, auth(a.token))).status).toBe(403)
+    expect((await call('POST', '/payouts', { payoutId: '9', details: bankDetails }, auth(a.token))).status).toBe(404)
+  })
+
+  test('bank payout without a verified ID fails so it can be refunded', async () => {
+    setup({ nairaAddress: NAIRA, payoutMode: 'simulate' })
+    const a = await aliceWithWallet(false)
+    chainPayouts.set(1n, { from: alice.address, amount: 1n, kind: 0, ref: keccakHex(bankDetails), status: 1 })
+    const r = await call('POST', '/payouts', { payoutId: '1', details: bankDetails }, auth(a.token))
+    expect(r.body.payout.status).toBe('failed')
+  })
+
+  test('manual mode waits for the operator, who marks it paid', async () => {
+    setup({ nairaAddress: NAIRA, kycAutoApprove: true })
+    const a = await aliceWithWallet()
+    chainPayouts.set(1n, { from: alice.address, amount: 50_000_000_000n, kind: 0, ref: keccakHex(bankDetails), status: 1 })
+    const r = await call('POST', '/payouts', { payoutId: '1', details: bankDetails }, auth(a.token))
+    expect(r.body.payout.status).toBe('processing')
+    const admin = { 'X-Admin-Token': 'admin-secret' }
+    const list = await call('GET', '/admin/payouts?status=processing', undefined, admin)
+    expect(list.body.payouts[0].details.accountNumber).toBe('0123456789')
+    expect((await call('POST', '/admin/payouts/1', { status: 'paid', reference: 'NIP-123' }, admin)).status).toBe(200)
+    const mine = await call('GET', '/payouts', undefined, auth(a.token))
+    expect(mine.body.payouts[0].status).toBe('paid')
+    expect(mine.body.payouts[0].reference).toBe('NIP-123')
+  })
+
+  test('bad bill details are refused', async () => {
+    setup({ nairaAddress: NAIRA, payoutMode: 'simulate' })
+    const a = await aliceWithWallet()
+    const bad = JSON.stringify({ kind: 'airtime', network: 'MTN', phone: '12345' })
+    chainPayouts.set(1n, { from: alice.address, amount: 1n, kind: 1, ref: keccakHex(bad), status: 1 })
+    expect((await call('POST', '/payouts', { payoutId: '1', details: bad }, auth(a.token))).status).toBe(400)
   })
 })

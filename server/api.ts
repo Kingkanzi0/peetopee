@@ -23,6 +23,9 @@
  *                       (auto-generated next to the database file when unset)
  *   ARC_RPC_URL         defaults to https://rpc.testnet.arc.io
  *   ESCROW_ADDRESS      defaults to the deployed PeetopeeEscrow
+ *   NAIRA_ADDRESS       the PeetopeeNaira (tNGN) contract; the admin page can also set it
+ *   PAYOUT_MODE         "simulate" (TESTNET: bank/bill payouts are marked paid at once)
+ *                       or "manual" (default: an operator pays and marks them on #admin)
  */
 import { Database } from 'bun:sqlite'
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomInt, timingSafeEqual } from 'node:crypto'
@@ -59,6 +62,8 @@ const SESSION_TTL_MS = 30 * 24 * 60 * 60_000
 const MAX_AVATAR_CHARS = 400_000        // ~300 KB image as a data URL
 const MAX_ID_IMAGE_CHARS = 4_000_000    // ~3 MB image as a data URL
 const MAX_BANK_DETAILS_CHARS = 1_000
+const PAYOUT_KINDS = ['bank', 'airtime', 'data', 'electricity', 'tv'] as const
+type PayoutKind = typeof PAYOUT_KINDS[number]
 const HANDLE_RE = /^@[a-z0-9_]{3,20}$/
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
 const WALLET_KINDS = ['wallet', 'funds'] as const
@@ -188,6 +193,30 @@ export function decodeGetTrade(hex: string): OnchainTrade | null {
   return { tradeId, seller, trader, status, bankDetails: dec.decode(hexToBytes(strHex)) }
 }
 
+export interface OnchainPayout {
+  from: string
+  amount: bigint
+  kind: number
+  ref: string
+  status: number   // 1 requested, 2 refunded
+}
+
+const GET_PAYOUT_SELECTOR = keccakHex('getPayout(uint256)').slice(0, 10)
+
+/** Decode PeetopeeNaira.getPayout(uint256) → (address, uint256, uint8, bytes32, uint8, uint64). */
+export function decodeGetPayout(hex: string): OnchainPayout | null {
+  const h = hex.replace(/^0x/, '')
+  if (h.length < 64 * 6) return null
+  const word = (i: number) => h.slice(i * 64, i * 64 + 64)
+  return {
+    from: '0x' + word(0).slice(24),
+    amount: BigInt('0x' + word(1)),
+    kind: Number(BigInt('0x' + word(2))),
+    ref: '0x' + word(3),
+    status: Number(BigInt('0x' + word(4))),
+  }
+}
+
 /** A JSON-RPC error returned by the node (e.g. a contract revert). Passed through as-is. */
 export class RpcError extends Error {
   constructor(public code: number, message: string, public data?: unknown) { super(message) }
@@ -249,6 +278,10 @@ export interface ApiOptions {
   kycAutoApprove?: boolean
   adminToken?: string
   escrowAddress?: string
+  /** PeetopeeNaira contract (naira account token). Overridden by the admin page setting. */
+  nairaAddress?: string
+  /** simulate = testnet, payouts are marked paid immediately; manual = operator marks them. */
+  payoutMode?: 'simulate' | 'manual'
   now?: () => number
   /** For tests: replaces the call to the Arc explorer. */
   fetchExplorer?: (url: string) => Promise<unknown>
@@ -290,6 +323,8 @@ export function optionsFromEnv(db: Database, dbPath?: string): ApiOptions {
     kycAutoApprove: env.KYC_AUTO_APPROVE === '1',
     adminToken: env.ADMIN_TOKEN || undefined,
     escrowAddress: env.ESCROW_ADDRESS || DEFAULT_ESCROW,
+    nairaAddress: env.NAIRA_ADDRESS || undefined,
+    payoutMode: env.PAYOUT_MODE === 'simulate' ? 'simulate' : 'manual',
   }
 }
 
@@ -350,6 +385,36 @@ export function migrate(db: Database) {
       details_hash TEXT NOT NULL,
       details      TEXT NOT NULL,              -- encrypted
       created_at   INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS trade_evidence (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      trade_id   TEXT NOT NULL,
+      role       TEXT NOT NULL,                -- seller | trader
+      author     TEXT NOT NULL,                -- contact of the person who added it
+      body       TEXT NOT NULL,                -- encrypted JSON { text, image }
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS trade_evidence_trade ON trade_evidence(trade_id);
+    CREATE TABLE IF NOT EXISTS payouts (
+      payout_id    TEXT NOT NULL,              -- id in the naira contract
+      contract     TEXT NOT NULL,              -- naira contract address
+      contact      TEXT NOT NULL,              -- who asked for it
+      from_address TEXT NOT NULL,
+      kind         TEXT NOT NULL,              -- bank | airtime | data | electricity | tv
+      amount       TEXT NOT NULL,              -- naira, 6 decimals, as an integer string
+      details      TEXT NOT NULL,              -- encrypted JSON (account number, phone, meter…)
+      status       TEXT NOT NULL,              -- processing | paid | failed
+      reference    TEXT NOT NULL DEFAULT '',   -- partner reference, or SIM-… when simulated
+      token        TEXT NOT NULL DEFAULT '',   -- electricity token, if any
+      reason       TEXT NOT NULL DEFAULT '',
+      created_at   INTEGER NOT NULL,
+      updated_at   INTEGER NOT NULL,
+      PRIMARY KEY (contract, payout_id)
+    );
+    CREATE INDEX IF NOT EXISTS payouts_contact ON payouts(contact);
+    CREATE TABLE IF NOT EXISTS config (
+      key   TEXT PRIMARY KEY,
+      value TEXT NOT NULL
     );
   `)
 
@@ -654,6 +719,76 @@ export function createApi(opts: ApiOptions) {
     return { ok: true, details: decrypt(dataKey, row.details) }
   }
 
+  // ── dispute evidence ──────────────────────────────────────────────────────
+
+  const MAX_EVIDENCE_TEXT = 1_000
+  const MAX_EVIDENCE_PER_TRADE = 20
+
+  /** Which side of the trade this account is on, or null. */
+  function roleIn(contact: string, trade: OnchainTrade): 'seller' | 'trader' | null {
+    const mine = verifiedAddressesOf(contact)
+    if (mine.has(trade.seller.toLowerCase())) return 'seller'
+    if (mine.has(trade.trader.toLowerCase())) return 'trader'
+    return null
+  }
+
+  function evidenceFor(tradeId: bigint) {
+    return db.query<{ id: number; role: string; body: string; created_at: number }, string>(
+      'SELECT id, role, body, created_at FROM trade_evidence WHERE trade_id = ? ORDER BY created_at ASC').all(tradeId.toString())
+      .map(r => ({ id: r.id, role: r.role, createdAt: r.created_at, ...(JSON.parse(decrypt(dataKey, r.body)) as { text: string; image?: string }) }))
+  }
+
+  async function addEvidence(contact: string, body: Json) {
+    let tradeId: bigint
+    try { tradeId = BigInt(String(body.tradeId)) } catch { throw new HttpError(400, 'Invalid trade.') }
+    const text = String(body.text ?? '').trim().slice(0, MAX_EVIDENCE_TEXT)
+    const image = body.image ? String(body.image) : ''
+    if (!text && !image) throw new HttpError(400, 'Add a message or a photo.')
+    if (image && (!image.startsWith('data:image/') || image.length > MAX_ID_IMAGE_CHARS)) {
+      throw new HttpError(400, 'The photo must be an image under 3 MB.')
+    }
+    const trade = await readTrade(tradeId)
+    if (!trade) throw new HttpError(404, 'Trade not found.')
+    const role = roleIn(contact, trade)
+    if (!role) throw new HttpError(403, 'Only the seller and trader can add evidence.')
+    const count = db.query<{ n: number }, string>('SELECT count(*) AS n FROM trade_evidence WHERE trade_id = ?').get(tradeId.toString())
+    if ((count?.n ?? 0) >= MAX_EVIDENCE_PER_TRADE) throw new HttpError(429, 'This trade already has the maximum amount of evidence.')
+    db.query('INSERT INTO trade_evidence (trade_id, role, author, body, created_at) VALUES (?,?,?,?,?)')
+      .run(tradeId.toString(), role, contact, encrypt(dataKey, JSON.stringify({ text, ...(image ? { image } : {}) })), now())
+    return { ok: true }
+  }
+
+  async function listEvidence(contact: string, tradeIdRaw: string) {
+    let tradeId: bigint
+    try { tradeId = BigInt(tradeIdRaw) } catch { throw new HttpError(400, 'Invalid trade.') }
+    const trade = await readTrade(tradeId)
+    if (!trade) throw new HttpError(404, 'Trade not found.')
+    if (!roleIn(contact, trade)) throw new HttpError(403, 'Only the seller and trader can see this evidence.')
+    return { ok: true, evidence: evidenceFor(tradeId) }
+  }
+
+  /** Everything the admin needs to decide a dispute. */
+  async function adminDispute(tradeIdRaw: string) {
+    let tradeId: bigint
+    try { tradeId = BigInt(tradeIdRaw) } catch { throw new HttpError(400, 'Invalid trade.') }
+    const trade = await readTrade(tradeId)
+    if (!trade) throw new HttpError(404, 'Trade not found.')
+    const details = db.query<{ details: string }, string>('SELECT details FROM trade_details WHERE trade_id = ?').get(tradeId.toString())
+    const who = (address: string) => {
+      const row = db.query<{ ptp_id: string; display_name: string; email: string }, string>(
+        `SELECT u.ptp_id, u.display_name, u.email FROM linked_wallets w JOIN users u ON u.email = w.email
+         WHERE w.address = ? AND w.verified = 1 LIMIT 1`).get(address.toLowerCase())
+      return row ? { ptpId: row.ptp_id, name: row.display_name, contact: row.email } : null
+    }
+    return {
+      ok: true,
+      seller: who(trade.seller),
+      trader: who(trade.trader),
+      bankDetails: details ? decrypt(dataKey, details.details) : null,
+      evidence: evidenceFor(tradeId),
+    }
+  }
+
   function adminListKyc(status: string) {
     const rows = db.query<Record<string, unknown>, string>(
       `SELECT k.id, k.contact, k.full_name, k.id_type, k.id_number, k.country_code, k.status, k.reason, k.submitted_at,
@@ -676,6 +811,146 @@ export function createApi(opts: ApiOptions) {
     const res = db.query('UPDATE kyc SET status = ?, reason = ?, reviewed_at = ? WHERE id = ?').run(decision, reason, now(), id)
     if (res.changes === 0) throw new HttpError(404, 'Submission not found.')
     return { ok: true }
+  }
+
+  // ── naira account payouts (bank, airtime, data, electricity, TV) ─────────
+
+  function nairaAddress(): string {
+    const row = db.query<{ value: string }, string>('SELECT value FROM config WHERE key = ?').get('naira_address')
+    return (row?.value || opts.nairaAddress || '').toLowerCase()
+  }
+
+  function config() {
+    return { ok: true, nairaAddress: nairaAddress() || null, payoutMode: opts.payoutMode ?? 'manual' }
+  }
+
+  async function readPayout(contract: string, payoutId: bigint): Promise<OnchainPayout | null> {
+    if (!opts.rpc) throw new HttpError(503, 'Chain access is not configured.')
+    const data = GET_PAYOUT_SELECTOR + payoutId.toString(16).padStart(64, '0')
+    try {
+      const result = await opts.rpc('eth_call', [{ to: contract, data }, 'latest']) as string
+      const p = decodeGetPayout(result)
+      return p && p.status !== 0 ? p : null
+    } catch (e) {
+      if (e instanceof RpcError) return null // UnknownPayout reverts
+      throw e
+    }
+  }
+
+  /** Check the details the app sends have the fields a payout partner needs. */
+  function validatePayoutDetails(kind: PayoutKind, d: Record<string, unknown>) {
+    const str = (k: string) => String(d[k] ?? '').trim()
+    const need = (ok: boolean, msg: string) => { if (!ok) throw new HttpError(400, msg) }
+    if (kind === 'bank') {
+      need(!!str('bank'), 'Choose a bank.')
+      need(/^\d{10}$/.test(str('accountNumber')), 'Enter the 10-digit account number.')
+      need(str('accountName').length >= 2, "Enter the account holder's name.")
+    } else if (kind === 'airtime' || kind === 'data') {
+      need(!!str('network'), 'Choose a network.')
+      need(/^0\d{10}$/.test(str('phone')), 'Enter an 11-digit phone number, e.g. 08031234567.')
+      if (kind === 'data') need(!!str('plan'), 'Choose a data plan.')
+    } else if (kind === 'electricity') {
+      need(!!str('disco'), 'Choose your electricity company.')
+      need(/^\d{11,13}$/.test(str('meterNumber')), 'Enter your 11–13 digit meter number.')
+    } else if (kind === 'tv') {
+      need(!!str('provider'), 'Choose a TV provider.')
+      need(/^\d{10,12}$/.test(str('smartcard')), 'Enter your smartcard / IUC number.')
+      need(!!str('plan'), 'Choose a package.')
+    }
+  }
+
+  type PayoutRow = {
+    payout_id: string; contract: string; contact: string; from_address: string; kind: string; amount: string
+    details: string; status: string; reference: string; token: string; reason: string; created_at: number; updated_at: number
+  }
+
+  function publicPayout(r: PayoutRow, withContact = false) {
+    return {
+      payoutId: r.payout_id, kind: r.kind, amount: r.amount, status: r.status, reference: r.reference,
+      token: r.token || undefined, reason: r.reason || undefined, createdAt: r.created_at, updatedAt: r.updated_at,
+      details: JSON.parse(decrypt(dataKey, r.details)) as Record<string, unknown>,
+      ...(withContact ? { contact: r.contact, fromAddress: r.from_address } : {}),
+    }
+  }
+
+  function payoutRow(contract: string, payoutId: string) {
+    return db.query<PayoutRow, [string, string]>('SELECT * FROM payouts WHERE contract = ? AND payout_id = ?').get(contract, payoutId)
+  }
+
+  /** The app burned naira on-chain for a payout; record where it should go and pay it out. */
+  async function postPayout(contact: string, body: Json) {
+    const contract = nairaAddress()
+    if (!contract) throw new HttpError(503, "The naira account isn't switched on yet.")
+    let payoutId: bigint
+    try { payoutId = BigInt(String(body.payoutId)) } catch { throw new HttpError(400, 'Invalid payout.') }
+    const detailsText = String(body.details ?? '')
+    if (!detailsText || detailsText.length > MAX_BANK_DETAILS_CHARS) throw new HttpError(400, 'Invalid payout details.')
+    let details: Record<string, unknown>
+    try { details = JSON.parse(detailsText) } catch { throw new HttpError(400, 'Invalid payout details.') }
+
+    const existing = payoutRow(contract, payoutId.toString())
+    if (existing) {
+      if (existing.contact !== contact) throw new HttpError(403, 'This payout belongs to someone else.')
+      return { ok: true, payout: publicPayout(existing) }
+    }
+
+    const onchain = await readPayout(contract, payoutId)
+    if (!onchain) throw new HttpError(404, 'Payout not found on-chain yet.')
+    if (!verifiedAddressesOf(contact).has(onchain.from.toLowerCase())) throw new HttpError(403, 'This payout was not made from your wallet.')
+    if (onchain.ref.toLowerCase() !== keccakHex(detailsText)) throw new HttpError(400, "These details don't match the payout on-chain.")
+    if (onchain.status !== 1) throw new HttpError(409, 'This payout was already refunded.')
+    const kind = PAYOUT_KINDS[onchain.kind]
+    if (!kind || details.kind !== kind) throw new HttpError(400, 'Payout type mismatch.')
+    validatePayoutDetails(kind, details)
+
+    let status = 'processing'
+    let reference = ''
+    let token = ''
+    let reason = ''
+    if (kind === 'bank' && kycStatus(contact)?.status !== 'approved') {
+      status = 'failed'
+      reason = 'Bank transfers need a verified ID. Your naira will be refunded.'
+    } else if (opts.payoutMode === 'simulate') {
+      // TESTNET: no money moves. Pretend a payment partner paid it at once.
+      status = 'paid'
+      reference = `SIM-${randomBytes(5).toString('hex').toUpperCase()}`
+      if (kind === 'electricity') token = Array.from({ length: 5 }, () => String(randomInt(0, 10_000)).padStart(4, '0')).join('-')
+    }
+    const t = now()
+    db.query(`INSERT INTO payouts (payout_id, contract, contact, from_address, kind, amount, details, status, reference, token, reason, created_at, updated_at)
+              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(payoutId.toString(), contract, contact, onchain.from.toLowerCase(), kind, onchain.amount.toString(),
+        encrypt(dataKey, detailsText), status, reference, token, reason, t, t)
+    return { ok: true, payout: publicPayout(payoutRow(contract, payoutId.toString())!) }
+  }
+
+  function myPayouts(contact: string) {
+    const rows = db.query<PayoutRow, [string, string]>(
+      'SELECT * FROM payouts WHERE contact = ? AND contract = ? ORDER BY created_at DESC LIMIT 50').all(contact, nairaAddress())
+    return { ok: true, payouts: rows.map(r => publicPayout(r)) }
+  }
+
+  function adminListPayouts(status: string) {
+    const rows = db.query<PayoutRow, [string, string]>(
+      'SELECT * FROM payouts WHERE status = ? AND contract = ? ORDER BY created_at ASC LIMIT 200').all(status, nairaAddress())
+    return { ok: true, payouts: rows.map(r => publicPayout(r, true)) }
+  }
+
+  function adminUpdatePayout(payoutId: string, body: Json) {
+    const status = String(body.status ?? '')
+    if (status !== 'paid' && status !== 'failed') throw new HttpError(400, 'Status must be paid or failed.')
+    const res = db.query('UPDATE payouts SET status = ?, reference = ?, reason = ?, updated_at = ? WHERE contract = ? AND payout_id = ?')
+      .run(status, String(body.reference ?? '').slice(0, 100), String(body.reason ?? '').slice(0, 300), now(), nairaAddress(), payoutId)
+    if (res.changes === 0) throw new HttpError(404, 'Payout not found.')
+    return { ok: true }
+  }
+
+  function adminSetConfig(body: Json) {
+    const addr = String(body.nairaAddress ?? '').trim()
+    if (!ADDRESS_RE.test(addr)) throw new HttpError(400, 'Enter a contract address (0x…).')
+    db.query('INSERT INTO config (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+      .run('naira_address', addr.toLowerCase())
+    return config()
   }
 
   /**
@@ -758,6 +1033,16 @@ export function createApi(opts: ApiOptions) {
       if (m === 'POST' && route === '/kyc/submit') return json(submitKyc(sessionContact(req), await readBody(req)))
       if (m === 'POST' && route === '/trade-details') return json(await postTradeDetails(sessionContact(req), await readBody(req)))
       if (m === 'GET' && route === '/trade-details') return json(await getTradeDetails(sessionContact(req), url.searchParams.get('tradeId') ?? ''))
+      if (m === 'POST' && route === '/trade-evidence') return json(await addEvidence(sessionContact(req), await readBody(req)))
+      if (m === 'GET' && route === '/trade-evidence') return json(await listEvidence(sessionContact(req), url.searchParams.get('tradeId') ?? ''))
+      if (m === 'GET' && route === '/config') return json(config())
+      if (m === 'POST' && route === '/payouts') return json(await postPayout(sessionContact(req), await readBody(req)))
+      if (m === 'GET' && route === '/payouts') return json(myPayouts(sessionContact(req)))
+      if (m === 'POST' && route === '/admin/config') { requireAdmin(req); return json(adminSetConfig(await readBody(req))) }
+      if (m === 'GET' && route === '/admin/payouts') { requireAdmin(req); return json(adminListPayouts(url.searchParams.get('status') ?? 'processing')) }
+      const payoutMatch = route.match(/^\/admin\/payouts\/(\d+)$/)
+      if (m === 'POST' && payoutMatch) { requireAdmin(req); return json(adminUpdatePayout(payoutMatch[1], await readBody(req))) }
+      if (m === 'GET' && route === '/admin/dispute') { requireAdmin(req); return json(await adminDispute(url.searchParams.get('tradeId') ?? '')) }
 
       const adminMatch = route.match(/^\/admin\/kyc(?:\/(\d+))?$/)
       if (adminMatch) {

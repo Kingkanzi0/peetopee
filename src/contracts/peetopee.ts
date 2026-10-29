@@ -1,12 +1,28 @@
-// ABI of the deployed contract (committed), so the app builds without running Foundry first.
-import artifact from '../../contracts/contract-metadata/PeetopeeEscrow.json'
+// ABIs of the escrow contracts (committed), so the app builds without running Foundry first.
+import v1Artifact from '../../contracts/contract-metadata/PeetopeeEscrow.json'
+import v2Artifact from '../../contracts/contract-metadata/PeetopeeEscrowV2.json'
 
-export const PEETOPEE_ESCROW_ADDRESS = '0x59417b13a4d545ff514642a1db1693f35652daea' as const
+const ESCROW_V1_ADDRESS = '0x59417b13a4d545ff514642a1db1693f35652daea'
+
+/**
+ * PeetopeeEscrowV2 (trader bonds, 48h confirm window, slashing).
+ * Leave empty until V2 is deployed; then paste its address here and redeploy the
+ * app. Everything V2-specific in the UI switches on automatically.
+ */
+const ESCROW_V2_ADDRESS = ''
+
+export const ESCROW_VERSION: 1 | 2 = ESCROW_V2_ADDRESS ? 2 : 1
+export const IS_ESCROW_V2 = ESCROW_VERSION === 2
+
+export const PEETOPEE_ESCROW_ADDRESS = (ESCROW_V2_ADDRESS || ESCROW_V1_ADDRESS) as `0x${string}`
 
 export const PEETOPEE_ESCROW = {
   address: PEETOPEE_ESCROW_ADDRESS,
-  abi: artifact.abi,
+  abi: IS_ESCROW_V2 ? v2Artifact.abi : v1Artifact.abi,
 } as const
+
+/** V2: seller has this long after "fiat sent" to confirm or dispute before the trader can claim. */
+export const CONFIRM_WINDOW_SECONDS = 172_800
 
 // Arc Testnet chain ID
 export const ARC_TESTNET_CHAIN_ID = 5042002
@@ -43,6 +59,12 @@ export interface TraderProfile {
   isActive: boolean
   completedTrades: bigint
   totalRatingPoints: bigint
+  /** V2 only */
+  ratingCount?: bigint
+  /** V2 only: USDC locked as a bond */
+  bond?: bigint
+  /** V2 only */
+  openTrades?: bigint
 }
 
 export interface Trade {
@@ -58,6 +80,8 @@ export interface Trade {
   disputedAt: bigint
   sellerDisputed: boolean
   traderDisputed: boolean
+  /** V2 only: platform fee fixed at creation */
+  feeBps?: bigint
 }
 
 // Country definitions for the "Where are you?" selector
@@ -101,6 +125,7 @@ export function calcLocalAmount(usdcAmount: bigint, rate: bigint): bigint {
 
 /** Trader rating as 0-5 number */
 export function traderRating(profile: TraderProfile): number {
-  if (profile.completedTrades === 0n) return 0
-  return Number(profile.totalRatingPoints) / Number(profile.completedTrades)
+  const count = profile.ratingCount ?? profile.completedTrades
+  if (!count) return 0
+  return Number(profile.totalRatingPoints) / Number(count)
 }

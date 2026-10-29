@@ -1,28 +1,43 @@
 /**
  * SendScreen — ways to send money.
  *
+ *  - Naira account: send naira by @handle, to any Nigerian bank, or pay bills —
+ *    straight from your naira balance, no trader involved
  *  - Send USDC to anyone by Peetopee ID (instant, on Arc)
- *  - Pay a local bank account (a shop, a friend, yourself): a verified local
- *    trader pays it in local currency and receives your USDC from escrow
+ *  - Pay a bank with USDC through a verified local trader (escrow)
  */
 import { useState } from 'react'
-import { Building2, ChevronRight, AtSign, Zap, Copy, Check } from 'lucide-react'
+import { Building2, ChevronRight, AtSign, Zap, Copy, Check, Smartphone } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import { SendUsdcByPtpId } from './SendUsdcByPtpId'
 import { TransactionHistory } from './TransactionHistory'
+import { NairaAccount } from './NairaAccount'
+import { useNairaConfig, useNairaBalance, formatNaira } from '../naira/nairaToken'
+import { useAppWallet } from '../wallet/appWallet'
+
+export type SendStart = 'choose' | 'usdc' | 'naira' | 'bank' | 'bills'
 
 interface Props {
-  /** Go to the Market's trader list to pay a bank account in local currency. */
+  /** Pay a bank with USDC through a verified trader (escrow). */
   onPayBank: () => void
+  /** Which screen to open on. */
+  start?: SendStart
 }
 
-export function SendScreen({ onPayBank }: Props) {
+export function SendScreen({ onPayBank, start = 'choose' }: Props) {
   const { profile } = useAuth()
-  const [mode, setMode] = useState<'choose' | 'usdc'>('choose')
+  const { wallet } = useAppWallet()
+  const naira = useNairaConfig()
+  const { balance: nairaBalance } = useNairaBalance(wallet?.address)
+  const [mode, setMode] = useState<SendStart>(start)
   const [copied, setCopied] = useState(false)
   const myId = profile?.ptpId
+  const back = () => setMode('choose')
 
-  if (mode === 'usdc') return <SendUsdcByPtpId onBack={() => setMode('choose')} />
+  if (mode === 'usdc') return <SendUsdcByPtpId onBack={back} />
+  if (mode === 'naira' || mode === 'bank' || mode === 'bills') {
+    return <NairaAccount key={mode} initialView={mode === 'naira' ? 'home' : mode} onBack={back} onUseTrader={onPayBank} />
+  }
 
   function copyId() {
     if (!myId) return
@@ -52,6 +67,45 @@ export function SendScreen({ onPayBank }: Props) {
       )}
 
       <div className="space-y-3">
+        {naira.address && (
+          <button onClick={() => setMode('naira')}
+            className="w-full rounded-2xl p-5 text-left flex items-center gap-4 transition-all active:scale-[0.99]"
+            style={{ background: 'linear-gradient(135deg, #064e3b 0%, #059669 100%)' }}>
+            <div className="size-12 rounded-2xl flex items-center justify-center shrink-0 text-white text-xl font-black" style={{ background: 'rgba(255,255,255,0.15)' }}>₦</div>
+            <div className="flex-1">
+              <div className="font-bold text-sm mb-0.5 text-white">Naira account · {nairaBalance == null ? '…' : formatNaira(nairaBalance)}</div>
+              <div className="text-xs text-white/75">Send naira to a @handle or any bank, and pay bills. No trader needed.</div>
+            </div>
+            <ChevronRight className="size-5 shrink-0 text-white/70" />
+          </button>
+        )}
+
+        {naira.address && (
+          <button onClick={() => setMode('bills')}
+            className="w-full rounded-2xl p-5 text-left flex items-center gap-4 transition-all active:scale-[0.99]"
+            style={{ background: 'var(--surface-strong)', border: '1.5px solid var(--border)' }}>
+            <div className="size-12 rounded-2xl flex items-center justify-center shrink-0" style={{ background: 'rgba(217,119,6,0.1)' }}>
+              <Smartphone className="size-6" style={{ color: '#d97706' }} />
+            </div>
+            <div className="flex-1">
+              <div className="font-bold text-sm mb-0.5" style={{ color: 'var(--ink)' }}>Pay bills</div>
+              <div className="text-xs" style={{ color: 'var(--muted)' }}>Airtime, data, electricity and TV from your naira balance.</div>
+            </div>
+            <ChevronRight className="size-5 shrink-0" style={{ color: 'var(--subtle)' }} />
+          </button>
+        )}
+
+        {!naira.address && (
+          <div className="rounded-2xl p-4" style={{ background: 'var(--surface-muted)', border: '1.5px dashed var(--border)' }}>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--subtle)' }}>Coming soon</span>
+              <span className="rounded-full px-2 py-0.5 text-[10px] font-bold" style={{ background: 'rgba(5,150,105,0.12)', color: '#059669' }}>SOON</span>
+            </div>
+            <ComingSoon icon={<span className="text-base font-black">₦</span>} title="Naira account" text="Hold naira on your @handle, send it to anyone and to any bank." />
+            <ComingSoon icon={<Smartphone className="size-4" />} title="Pay bills" text="Airtime, data, electricity and TV." />
+          </div>
+        )}
+
         <button
           onClick={() => setMode('usdc')}
           className="w-full rounded-2xl p-5 text-left flex items-center gap-4 transition-all active:scale-[0.99]"
@@ -68,7 +122,7 @@ export function SendScreen({ onPayBank }: Props) {
         </button>
 
         <button
-          onClick={onPayBank}
+          onClick={naira.address ? () => setMode('bank') : onPayBank}
           className="w-full rounded-2xl p-5 text-left flex items-center gap-4 transition-all active:scale-[0.99]"
           style={{ background: 'var(--surface-strong)', border: '1.5px solid var(--border)' }}
         >
@@ -76,9 +130,11 @@ export function SendScreen({ onPayBank }: Props) {
             <Building2 className="size-6 text-emerald-600" />
           </div>
           <div className="flex-1">
-            <div className="font-bold text-sm mb-0.5" style={{ color: 'var(--ink)' }}>Pay a local bank account</div>
+            <div className="font-bold text-sm mb-0.5" style={{ color: 'var(--ink)' }}>Send to bank</div>
             <div className="text-xs" style={{ color: 'var(--muted)' }}>
-              Pay a shop or person in their local currency. A verified local trader sends the money; your USDC stays in escrow until it arrives.
+              {naira.address
+                ? 'Naira into OPay, UBA, GTBank or any bank, straight from your naira balance.'
+                : 'Naira into OPay, UBA, GTBank or any bank. A verified trader sends it; your USDC stays in escrow until it arrives.'}
             </div>
           </div>
           <ChevronRight className="size-5 shrink-0" style={{ color: 'var(--subtle)' }} />
@@ -87,6 +143,18 @@ export function SendScreen({ onPayBank }: Props) {
 
       <div className="mt-8">
         <TransactionHistory compact filter={e => e.kind === 'sent' || e.kind === 'received'} title="Recent transfers" />
+      </div>
+    </div>
+  )
+}
+
+function ComingSoon({ icon, title, text }: { icon: React.ReactNode; title: string; text: string }) {
+  return (
+    <div className="flex items-start gap-3 py-2 opacity-70">
+      <div className="size-8 rounded-xl flex items-center justify-center shrink-0" style={{ background: 'white', color: '#059669' }}>{icon}</div>
+      <div>
+        <div className="text-sm font-semibold" style={{ color: 'var(--ink)' }}>{title}</div>
+        <div className="text-xs" style={{ color: 'var(--muted)' }}>{text}</div>
       </div>
     </div>
   )

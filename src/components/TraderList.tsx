@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useReadContract } from 'wagmi'
 import { Star, ShieldCheck, ShieldAlert, ArrowLeft, Zap, BadgePlus } from 'lucide-react'
 import { apiVerifiedAddresses } from '../auth/ptpApi'
-import { PEETOPEE_ESCROW, ARC_TESTNET_CHAIN_ID, CountryDef, TraderProfile, formatRate, traderRating } from '../contracts/peetopee'
+import { PEETOPEE_ESCROW, ARC_TESTNET_CHAIN_ID, CountryDef, TraderProfile, formatRate, traderRating, IS_ESCROW_V2 } from '../contracts/peetopee'
 import { Amount, usdcDecimalsFor } from '../onchain-money'
 
 interface Props {
@@ -12,8 +12,8 @@ interface Props {
   onRegisterTrader?: () => void
 }
 
-function TraderCard({ address, country, verified, onSelect }: {
-  address: string; country: CountryDef; verified: boolean | undefined; onSelect: (t: TraderProfile) => void
+function TraderCard({ address, country, verified, minBond, onSelect }: {
+  address: string; country: CountryDef; verified: boolean | undefined; minBond: bigint; onSelect: (t: TraderProfile) => void
 }) {
   const { data: profile, isLoading } = useReadContract({
     ...PEETOPEE_ESCROW,
@@ -33,6 +33,8 @@ function TraderCard({ address, country, verified, onSelect }: {
   const p = profile as TraderProfile | undefined
   // The contract keeps traders listed under countries they've moved away from; skip those.
   if (!p || !p.isActive || p.countryCode !== country.code) return null
+  const bonded = !IS_ESCROW_V2 || (p.bond ?? 0n) >= minBond
+  const canTrade = !!verified && bonded
   const rating = traderRating(p)
   const minFmt = Amount.fromRaw(p.minOrderUsdc, usdcDecimalsFor(ARC_TESTNET_CHAIN_ID)).toFixed(0)
   const maxFmt = Amount.fromRaw(p.maxOrderUsdc, usdcDecimalsFor(ARC_TESTNET_CHAIN_ID)).toFixed(0)
@@ -40,8 +42,8 @@ function TraderCard({ address, country, verified, onSelect }: {
 
   return (
     <button
-      onClick={() => verified && onSelect(p)}
-      disabled={!verified}
+      onClick={() => canTrade && onSelect(p)}
+      disabled={!canTrade}
       className="w-full rounded-2xl p-4 text-left transition-all hover:scale-[1.01] active:scale-[0.99] disabled:hover:scale-100 disabled:opacity-60"
       style={{
         background: 'var(--surface-strong)',
@@ -64,8 +66,12 @@ function TraderCard({ address, country, verified, onSelect }: {
                 <span className="text-xs" style={{ color: 'var(--subtle)' }}>Checking ID…</span>
               ) : verified ? (
                 <>
-                  <ShieldCheck className="size-3" style={{ color: 'var(--success)' }} />
-                  <span className="text-xs" style={{ color: 'var(--success)' }}>ID verified</span>
+                  <ShieldCheck className="size-3" style={{ color: bonded ? 'var(--success)' : 'var(--subtle)' }} />
+                  <span className="text-xs" style={{ color: bonded ? 'var(--success)' : 'var(--subtle)' }}>
+                    {bonded
+                      ? `ID verified${IS_ESCROW_V2 ? ` · ${(Number(p.bond ?? 0n) / 1e6).toLocaleString()} USDC deposit` : ''}`
+                      : 'ID verified · no deposit yet, can\'t trade'}
+                  </span>
                 </>
               ) : (
                 <>
@@ -140,6 +146,10 @@ export function TraderList({ country, onBack, onSelectTrader, onRegisterTrader }
   const traderAddresses = (traders as string[] | undefined) ?? []
   const [verified, setVerified] = useState<Record<string, boolean> | null>(null)
   const addrKey = traderAddresses.join(',')
+  const { data: minBondRaw } = useReadContract({
+    ...PEETOPEE_ESCROW, functionName: 'minTraderBond', chainId: ARC_TESTNET_CHAIN_ID, query: { enabled: IS_ESCROW_V2 },
+  })
+  const minBond = (minBondRaw as bigint | undefined) ?? 0n
 
   useEffect(() => {
     if (!addrKey) return
@@ -206,7 +216,7 @@ export function TraderList({ country, onBack, onSelectTrader, onRegisterTrader }
 
       <div className="space-y-3">
         {traderAddresses.map(addr => (
-          <TraderCard key={addr} address={addr} country={country} onSelect={onSelectTrader}
+          <TraderCard key={addr} address={addr} country={country} onSelect={onSelectTrader} minBond={minBond}
             verified={verified === null ? undefined : !!verified[addr.toLowerCase()]} />
         ))}
       </div>

@@ -33,6 +33,18 @@ services:
         sync: false
       - key: OTP_FROM_EMAIL
         sync: false
+      # Naira account (testnet): bank and bill payouts are marked paid at once — no money moves.
+      # Use "manual" when a real payment partner / operator pays them from #admin → Naira.
+      - key: PAYOUT_MODE
+        value: simulate
+      # Naira contract. The admin page (#admin → Naira) deploys it and switches it on, but the
+      # free plan forgets that on restart — paste the address here to make it stick.
+      # - key: NAIRA_ADDRESS
+      #   value: "0x..."
+      # Escrow contract the server checks trades against. Leave unset for V1;
+      # after deploying PeetopeeEscrowV2, set ESCROW_ADDRESS to its address here.
+      # - key: ESCROW_ADDRESS
+      #   value: "0x..."
       # Secret for the ID review page. Render generates it; copy it from the dashboard.
       - key: ADMIN_TOKEN
         generateValue: true

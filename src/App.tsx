@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react'
-import { useAccount, useConnect, useConnectors } from 'wagmi'
+import { useAccount } from 'wagmi'
 import { ShoppingBag, LayoutDashboard, Wallet, Banknote, Send } from 'lucide-react'
 import { WalletBar } from './components/WalletBar'
 import { TraderList } from './components/TraderList'
@@ -21,16 +21,19 @@ import { useTradeNotifications } from './hooks/useTradeNotifications'
 import { useWalletLink } from './hooks/useWalletLink'
 import type { CountryDef, TraderProfile } from './contracts/peetopee'
 import { AdminKyc } from './components/AdminKyc'
-import { useVisitingCountry } from './components/FundsScreen'
-import { useAppWallet } from './wallet/appWallet'
-import { unlockWallet, lockWallet } from './wallet/standaloneWallet'
-import { PEETOPEE_CONNECTOR_ID } from './wallet/peetopeeConnector'
+import { PayBankScreen } from './components/PayBankScreen'
+import { useVisitingCountry } from './hooks/useMoney'
+import { lockWallet } from './wallet/standaloneWallet'
+import { useWalletSession } from './wallet/useWalletSession'
+import type { SendStart } from './components/SendScreen'
+import { useNairaConfig } from './naira/nairaToken'
 
 type Screen =
   | { id: 'market' }
   | { id: 'traders'; country: CountryDef }
   | { id: 'sell'; country: CountryDef; trader: TraderProfile }
   | { id: 'trade'; tradeId: bigint }
+  | { id: 'paybank' }
 
 type Tab = 'market' | 'send' | 'funds' | 'wallet' | 'trader'
 
@@ -49,7 +52,13 @@ export default function App() {
   // Forget the decrypted wallet key when the user signs out.
   useEffect(() => { if (!profile) lockWallet() }, [profile])
 
-  if (admin) return <AdminKyc onExit={() => { window.location.hash = ''; setAdmin(false) }} />
+  const exitAdmin = () => { window.location.hash = ''; setAdmin(false) }
+  if (admin) {
+    // ID review only needs the admin token. Deciding disputes also needs your unlocked wallet.
+    return profile
+      ? <PinGate userName={profile.name}><AdminWithWallet onExit={exitAdmin} /></PinGate>
+      : <AdminKyc onExit={exitAdmin} />
+  }
   if (!splashDone) return <SplashScreen onDone={onSplashDone} />
   if (!profile) return <OnboardingFlow />
 
@@ -60,27 +69,27 @@ export default function App() {
   )
 }
 
+function AdminWithWallet({ onExit }: { onExit: () => void }) {
+  useWalletSession()
+  return <AdminKyc onExit={onExit} />
+}
+
 /** Everything after the PIN/biometric unlock. */
 function MainApp() {
-  const { address, isConnected } = useAccount()
-  const { connect } = useConnect()
-  const connectors = useConnectors()
-  const { wallet, unlocked } = useAppWallet()
+  const { address } = useAccount()
   const [visiting] = useVisitingCountry()
 
-  // Unlock the built-in wallet now that the user has passed the PIN gate…
-  useEffect(() => { void unlockWallet() }, [])
-  // …and use it (its Funds account) for all Market and Trader actions.
-  useEffect(() => {
-    if (!wallet || !unlocked || isConnected) return
-    const connector = connectors.find(c => c.id === PEETOPEE_CONNECTOR_ID)
-    if (connector) connect({ connector })
-  }, [wallet, unlocked, isConnected, connectors, connect])
+  // Unlock the built-in wallet now that the user has passed the PIN gate, and
+  // use its Funds account for all Market and Trader actions.
+  useWalletSession()
 
   const [showProfile, setShowProfile] = useState(false)
   const [tab, setTab] = useState<Tab>('market')
   const [screen, setScreen] = useState<Screen>({ id: 'market' })
   const [openTraderRegister, setOpenTraderRegister] = useState(false)
+  const [sendStart, setSendStart] = useState<SendStart>('choose')
+  const naira = useNairaConfig()
+  const openSend = (start: SendStart) => { setSendStart(start); setTab('send') }
 
   useTradeNotifications(address)
   useWalletLink() // registers the built-in wallet's addresses with your Peetopee ID (automatic)
@@ -120,6 +129,9 @@ function MainApp() {
               {screen.id === 'market' && (
                 <>
                   <MarketScreen
+                    onPayBank={() => naira.address ? openSend('bank') : setScreen({ id: 'paybank' })}
+                    onSendById={() => openSend('usdc')}
+                    onPayBills={naira.address ? () => openSend('bills') : undefined}
                     onStartTrade={(vendor, country) => {
                       // Find the matching onchain trader profile or fall back to demo flow
                       setScreen({ id: 'traders', country })
@@ -133,6 +145,15 @@ function MainApp() {
                   country={screen.country}
                   onBack={() => setScreen({ id: 'market' })}
                   onSelectTrader={t => setScreen({ id: 'sell', country: screen.country, trader: t })}
+                  onRegisterTrader={() => { setOpenTraderRegister(true); setTab('trader') }}
+                />
+              )}
+              {screen.id === 'paybank' && (
+                <PayBankScreen
+                  initialCountry={visiting}
+                  onBack={() => setScreen({ id: 'market' })}
+                  onTradeCreated={id => goToTrade(id)}
+                  onAddFunds={() => setTab('funds')}
                   onRegisterTrader={() => { setOpenTraderRegister(true); setTab('trader') }}
                 />
               )}
@@ -167,11 +188,15 @@ function MainApp() {
 
           {/* SEND TAB */}
           {tab === 'send' && (
-            <SendScreen onPayBank={() => { if (visiting) openTraders(visiting); else { setScreen({ id: 'market' }); setTab('market') } }} />
+            <SendScreen
+              key={sendStart}
+              start={sendStart}
+              onPayBank={() => { setScreen({ id: 'paybank' }); setTab('market') }}
+            />
           )}
 
           {/* FUNDS TAB */}
-          {tab === 'funds' && <FundsScreen onSell={openTraders} onOpenWallet={() => setTab('wallet')} />}
+          {tab === 'funds' && <FundsScreen onSell={openTraders} onOpenWallet={() => setTab('wallet')} onOpenNaira={() => openSend('naira')} />}
 
           {/* WALLET TAB */}
           {tab === 'wallet' && <WalletTab onBack={() => setTab('market')} />}
@@ -200,7 +225,7 @@ function MainApp() {
           }}
         >
           <NavTab active={tab === 'market'} label="Market" icon={<ShoppingBag className="size-5" />} onClick={() => { setTab('market'); setScreen({ id: 'market' }) }} />
-          <NavTab active={tab === 'send'} label="Send" icon={<Send className="size-5" />} onClick={() => setTab('send')} />
+          <NavTab active={tab === 'send'} label="Send" icon={<Send className="size-5" />} onClick={() => openSend('choose')} />
           <NavTab active={tab === 'funds'} label="Funds" icon={<Banknote className="size-5" />} onClick={() => setTab('funds')} />
           <NavTab active={tab === 'wallet'} label="Wallet" icon={<Wallet className="size-5" />} onClick={() => setTab('wallet')} />
           <NavTab active={tab === 'trader'} label="Trader" icon={<LayoutDashboard className="size-5" />} onClick={() => setTab('trader')} />

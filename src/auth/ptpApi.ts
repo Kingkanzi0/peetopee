@@ -177,7 +177,68 @@ export async function apiGetTradeDetails(tradeId: bigint): Promise<string | null
   return res.details
 }
 
-// ── admin (ID review) ───────────────────────────────────────────────────────
+// ── dispute evidence ────────────────────────────────────────────────────────
+
+export interface Evidence {
+  id: number
+  role: 'seller' | 'trader'
+  text: string
+  image?: string
+  createdAt: number
+}
+
+export async function apiAddEvidence(tradeId: bigint, text: string, image?: string) {
+  await request('POST', '/trade-evidence', { tradeId: tradeId.toString(), text, ...(image ? { image } : {}) }, true)
+}
+
+export async function apiListEvidence(tradeId: bigint): Promise<Evidence[]> {
+  const res = await request<{ evidence: Evidence[] }>('GET', `/trade-evidence?tradeId=${tradeId.toString()}`, undefined, true)
+  return res.evidence
+}
+
+// ── naira account ───────────────────────────────────────────────────────────
+
+export interface ServerConfig {
+  /** PeetopeeNaira contract, or null while the naira account is switched off. */
+  nairaAddress: string | null
+  /** simulate = testnet (payouts are marked paid at once), manual = an operator pays them. */
+  payoutMode: 'simulate' | 'manual'
+}
+
+export function apiConfig() {
+  return request<ServerConfig>('GET', '/config')
+}
+
+export type PayoutKind = 'bank' | 'airtime' | 'data' | 'electricity' | 'tv'
+
+export interface Payout {
+  payoutId: string
+  kind: PayoutKind
+  /** naira, 6 decimals, integer string */
+  amount: string
+  status: 'processing' | 'paid' | 'failed'
+  reference: string
+  token?: string
+  reason?: string
+  createdAt: number
+  updatedAt: number
+  details: Record<string, string>
+  contact?: string
+  fromAddress?: string
+}
+
+/** Tell the server where a payout (already burned on-chain) should go. `details` must hash to the on-chain ref. */
+export async function apiPostPayout(payoutId: bigint, details: string) {
+  const res = await request<{ payout: Payout }>('POST', '/payouts', { payoutId: payoutId.toString(), details }, true)
+  return res.payout
+}
+
+export async function apiMyPayouts() {
+  const res = await request<{ payouts: Payout[] }>('GET', '/payouts', undefined, true)
+  return res.payouts
+}
+
+// ── admin (ID review, disputes) ─────────────────────────────────────────────
 
 export interface KycSubmission {
   id: number
@@ -212,4 +273,17 @@ export const adminApi = {
     adminRequest<{ submission: KycSubmission }>('GET', `/admin/kyc/${id}`, token).then(r => r.submission),
   review: (token: string, id: number, decision: 'approved' | 'rejected', reason: string) =>
     adminRequest('POST', `/admin/kyc/${id}`, token, { decision, reason }),
+  dispute: (token: string, tradeId: bigint) =>
+    adminRequest<{
+      seller: { ptpId: string; name: string; contact: string } | null
+      trader: { ptpId: string; name: string; contact: string } | null
+      bankDetails: string | null
+      evidence: Evidence[]
+    }>('GET', `/admin/dispute?tradeId=${tradeId.toString()}`, token),
+  payouts: (token: string, status: Payout['status']) =>
+    adminRequest<{ payouts: Payout[] }>('GET', `/admin/payouts?status=${status}`, token).then(r => r.payouts),
+  updatePayout: (token: string, payoutId: string, status: 'paid' | 'failed', reference: string, reason = '') =>
+    adminRequest('POST', `/admin/payouts/${payoutId}`, token, { status, reference, reason }),
+  setNairaAddress: (token: string, nairaAddress: string) =>
+    adminRequest<ServerConfig>('POST', '/admin/config', token, { nairaAddress }),
 }

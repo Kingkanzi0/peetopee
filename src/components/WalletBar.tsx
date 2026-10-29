@@ -1,6 +1,7 @@
 import { PeetopeeLogoSVG } from './PeetopeeLogoSVG'
 import { useAuth } from '../auth/AuthContext'
 import { useAppWallet, useUsdcBalance } from '../wallet/appWallet'
+import { useMoney } from '../hooks/useMoney'
 
 function getInitials(name: string) {
   return name.trim().split(/\s+/).slice(0, 2).map(w => w[0]?.toUpperCase() ?? '').join('')
@@ -17,7 +18,8 @@ export function WalletBar({ onProfileOpen }: WalletBarProps) {
   // Wallet + Funds, refreshed every 15 seconds.
   const main = useUsdcBalance(wallet?.address)
   const funds = useUsdcBalance(wallet && wallet.fundsAddress !== wallet.address ? wallet.fundsAddress : null)
-  const balance = main.balance == null ? null : (main.balance + (funds.balance ?? 0)).toFixed(2)
+  const total = main.balance == null ? null : main.balance + (funds.balance ?? 0)
+  const money = useMoney()
 
   const shortAddr = address ? `${address.slice(0, 6)}…${address.slice(-4)}` : null
 
@@ -40,17 +42,19 @@ export function WalletBar({ onProfileOpen }: WalletBarProps) {
 
         {/* Right side */}
         <div className="flex items-center gap-2 min-w-0">
-          {/* USDC balance pill */}
-          {balance && (
-            <div
-              className="flex items-center gap-1 rounded-xl px-2.5 py-1 shrink-0"
+          {/* Balance pill — tap to switch between local currency and USDC */}
+          {total != null && (
+            <button
+              onClick={money.toggle}
+              title={money.hasLocal ? `Show in ${money.showLocal ? 'USDC' : money.country?.currency}` : undefined}
+              className="flex items-center gap-1 rounded-xl px-2.5 py-1 shrink-0 active:scale-95 transition-all"
               style={{ background: 'var(--surface-muted)' }}
             >
               <div className="size-1.5 rounded-full shrink-0" style={{ background: 'var(--success)' }} />
               <span className="font-semibold tabular-nums" style={{ color: 'var(--ink)', fontSize: 11 }}>
-                ${balance}
+                {money.primary(total)}
               </span>
-            </div>
+            </button>
           )}
 
           {/* Address chip (when no profile) */}

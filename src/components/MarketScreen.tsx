@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Search, Star, Clock, TrendingUp, ChevronRight, ArrowLeft, Shield, CheckCircle2 } from 'lucide-react'
+import { Search, Star, Clock, TrendingUp, ChevronRight, ArrowLeft, Shield, CheckCircle2, Building2, AtSign, Smartphone } from 'lucide-react'
 import { COUNTRIES, CountryDef } from '../contracts/peetopee'
 import { useAuth } from '../auth/AuthContext'
 
@@ -46,9 +46,14 @@ function formatRate(rate: number, currency: string): string {
 
 interface MarketScreenProps {
   onStartTrade?: (vendor: Vendor, country: CountryDef) => void
+  /** Main actions shown at the top of the home screen. */
+  onPayBank?: () => void
+  onSendById?: () => void
+  /** Airtime, data, electricity, TV from the naira account (shown when it's on). */
+  onPayBills?: () => void
 }
 
-export function MarketScreen({ onStartTrade }: MarketScreenProps) {
+export function MarketScreen({ onStartTrade, onPayBank, onSendById, onPayBills }: MarketScreenProps) {
   const { profile } = useAuth()
   const [query, setQuery] = useState('')
   const [selectedCountry, setSelectedCountry] = useState<CountryDef | null>(
@@ -210,9 +215,54 @@ export function MarketScreen({ onStartTrade }: MarketScreenProps) {
   // Country selection
   return (
     <div className="max-w-lg mx-auto px-4 pt-4 pb-8">
+      {(onPayBank || onSendById) && (
+        <div className="grid grid-cols-2 gap-3 mb-6">
+          {onPayBank && (
+            <button onClick={onPayBank}
+              className="rounded-2xl p-4 text-left transition-all active:scale-[0.98]"
+              style={{ background: 'linear-gradient(135deg, #0f2557 0%, #1d4ed8 100%)' }}>
+              <Building2 className="size-6 text-white mb-3" />
+              <div className="text-sm font-bold text-white">Send to bank</div>
+              <div className="text-xs text-white/70 mt-0.5">USDC in, naira out — a verified trader pays OPay, UBA, any bank</div>
+            </button>
+          )}
+          {onSendById && (
+            <button onClick={onSendById}
+              className="rounded-2xl p-4 text-left transition-all active:scale-[0.98]"
+              style={{ background: 'var(--surface-strong)', border: '1.5px solid var(--border)' }}>
+              <AtSign className="size-6 mb-3" style={{ color: 'var(--accent)' }} />
+              <div className="text-sm font-bold" style={{ color: 'var(--ink)' }}>Send to a Peetopee ID</div>
+              <div className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>Instant USDC to any @handle</div>
+            </button>
+          )}
+          {!onPayBills && (
+            <div className="col-span-2 rounded-2xl px-4 py-3.5 flex items-center gap-3 opacity-70"
+              style={{ background: 'var(--surface-muted)', border: '1.5px dashed var(--border)' }}>
+              <Smartphone className="size-5 shrink-0" style={{ color: '#d97706' }} />
+              <div className="flex-1">
+                <div className="text-sm font-bold" style={{ color: 'var(--ink)' }}>Naira account & Pay bills</div>
+                <div className="text-xs" style={{ color: 'var(--muted)' }}>Coming soon</div>
+              </div>
+              <span className="rounded-full px-2 py-0.5 text-[10px] font-bold" style={{ background: 'rgba(5,150,105,0.12)', color: '#059669' }}>SOON</span>
+            </div>
+          )}
+          {onPayBills && (
+            <button onClick={onPayBills}
+              className="col-span-2 rounded-2xl px-4 py-3.5 text-left flex items-center gap-3 transition-all active:scale-[0.98]"
+              style={{ background: 'var(--surface-strong)', border: '1.5px solid var(--border)' }}>
+              <Smartphone className="size-5 shrink-0" style={{ color: '#d97706' }} />
+              <div className="flex-1">
+                <div className="text-sm font-bold" style={{ color: 'var(--ink)' }}>Pay bills</div>
+                <div className="text-xs" style={{ color: 'var(--muted)' }}>Airtime, data, electricity, TV — from your naira account</div>
+              </div>
+            </button>
+          )}
+        </div>
+      )}
+
       <div className="mb-5">
         <h1 className="text-xl font-bold mb-0.5" style={{ color: 'var(--ink)', fontFamily: "'Space Grotesk', sans-serif", letterSpacing: '-0.02em' }}>
-          Where are you travelling?
+          Or sell USDC in a country
         </h1>
         <p className="text-sm" style={{ color: 'var(--muted)' }}>
           Select a country to see verified vendors and live rates.

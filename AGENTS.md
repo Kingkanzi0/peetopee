@@ -55,6 +55,45 @@ Peetopee is a peer-to-peer marketplace where sellers lock USDC in escrow and loc
    JSON-RPC relay) and history via `/api/history`, falling back to the public endpoints in
    `src/wallet/arcNetwork.ts`. Browser blockers like Brave Shields block public RPC hosts, not the app's own server.
 
+## Naira account (testnet)
+
+**Status: COMING SOON.** `NAIRA_ACCOUNT_LIVE = false` in `src/naira/nairaToken.ts` hides it from users (they see
+"Coming soon" cards; "Send to bank" uses P2P traders). The admin page can still deploy and test it.
+
+A naira balance tied to the user's @handle, held in their own **Wallet** account as `tNGN`
+(`contracts/PeetopeeNaira.sol`, 14 tests in `contracts/test/PeetopeeNaira.t.sol`). No trader needed.
+
+- **Add / convert**: USDC ⇄ naira at the admin-set rate minus a spread; USDC paid in stays as the reserve.
+  Testnet faucet gives free test naira once a day.
+- **Send by @handle**: plain ERC-20 transfer to the recipient's wallet address.
+- **Bank transfers and bills** (airtime, data, electricity, TV): `requestPayout` burns the naira with
+  `ref = keccak256(detailsJSON)`; the app then `POST /payouts` with the details. The server checks the
+  hash/sender on-chain, stores the details encrypted, and pays out — simulated when `PAYOUT_MODE=simulate`
+  (marked paid, fake reference, electricity token), otherwise queued for the operator on `#admin → Naira`.
+  Failed payouts are refunded on-chain by the contract admin (`refundPayout` re-mints).
+- **Bank payouts need ID verification** (UI gate + server marks them failed otherwise).
+- **Switching it on**: `#admin → Naira → Deploy` deploys from the operator's Funds account (it becomes admin)
+  and stores the address on the server (`/config`). Set `NAIRA_ADDRESS` on Render so it survives restarts.
+- **Before real money**: tNGN must be replaced by a licensed, fully backed naira stablecoin (e.g. cNGN) or a
+  licensed partner's accounts, and payouts must go through a licensed payment partner. Turn the faucet off.
+
+Key files: `src/naira/nairaToken.ts` (contract calls, config), `src/naira/bills.ts` (bill catalogue — sample
+prices), `src/components/NairaAccount.tsx`, `NairaPayouts.tsx`, `NairaUi.tsx`, `AdminNaira.tsx`.
+
+## Escrow V2 (trader bonds) — upgrade steps
+
+`contracts/PeetopeeEscrowV2.sol` adds trader bonds (min deposit, slashable to the seller on a lost
+dispute), a 48h confirm window after "fiat sent" (trader can `claimAfterConfirmWindow`), fee fixed at
+creation, correct country lists and rating counts. Tests: `contracts/test/PeetopeeEscrowV2.t.sol`
+(22 unit tests + 2 invariants). V1 stays deployed; the app uses V2 only once its address is set.
+
+1. Deploy V2 on Arc Testnet: constructor `(0x3600…0000 USDC, admin, treasury, feeBps=50, minTraderBond=50000000)`.
+   `admin` should be the operator's Peetopee **Funds** address so disputes can be resolved in-app.
+   Script: `contracts/script/DeployEscrowV2.s.sol` (env ADMIN, TREASURY, FEE_BPS, MIN_BOND).
+2. Put the address in `ESCROW_V2_ADDRESS` in `src/contracts/peetopee.ts`.
+3. Set `ESCROW_ADDRESS=<V2 address>` on the server (Render env var) so bank details/evidence use V2 trades.
+4. Traders must re-register and lock a deposit on V2 (Trader tab). Open V1 trades finish on V1.
+
 ## Server environment variables
 
 | Variable | Purpose |
@@ -65,6 +104,8 @@ Peetopee is a peer-to-peer marketplace where sellers lock USDC in escrow and loc
 | `ADMIN_TOKEN` | Enables the ID review page |
 | `DATA_KEY` | 64 hex chars; encrypts ID photos and bank details (auto-generated next to the DB if unset) |
 | `DB_PATH`, `ARC_RPC_URL`, `ESCROW_ADDRESS` | Storage / chain settings |
+| `NAIRA_ADDRESS` | Naira account contract (also settable from `#admin → Naira`) |
+| `PAYOUT_MODE` | `simulate` (testnet: payouts marked paid at once) or `manual` (operator pays them) |
 
 Server tests: `cd server && bun install && bun test`
 
@@ -80,8 +121,11 @@ Server tests: `cd server && bun install && bun test`
 - `src/components/TradeBankDetails.tsx` — shows a trade's bank details to its seller/trader
 - `src/components/FundsScreen.tsx` — Funds + Wallet balances in USDC and the visiting country's currency; Wallet ↔ Funds moves
 - `src/components/SendUsdcByPtpId.tsx` — send USDC by @handle with live lookup + avatar
+- `src/components/PayBankScreen.tsx` + `src/payments/banks.ts` — "Pay a bank account": pick bank (OPay, UBA…), enter naira amount, best verified-trader quote, then the pre-filled escrow sell flow
 - `src/components/TransactionHistory.tsx` / `src/history/txHistory.ts` — history (local log + Arc explorer API)
 - `src/components/KycFlow.tsx`, `src/components/AdminKyc.tsx` — ID verification and review
+- `src/components/DisputeEvidence.tsx`, `src/components/AdminDisputes.tsx` — dispute evidence (both sides) and admin resolution (`resolveDispute`; the admin's Funds account must be the contract `admin`)
+- `src/hooks/useMoney.ts` — local-currency display (₦ first, USDC alongside) and the visiting country
 - `src/wallet/peetopeeConnector.ts` — wagmi connector for the built-in wallet's Funds account
 - `server/api.ts` + `server/api.test.ts` — backend and its tests
 - `src/contracts/peetopee.ts` — contract address, ABI, types, helpers

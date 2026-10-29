@@ -10,10 +10,12 @@ import {
   TradeStatus as TS,
   TRADE_STATUS_LABELS,
   Trade,
+  IS_ESCROW_V2,
 } from '../contracts/peetopee'
 import { Amount, usdcDecimalsFor } from '../onchain-money'
 import { friendlyTxError } from '../wallet/appWallet'
 import { KycGate } from './KycFlow'
+import { TraderBond } from './TraderBond'
 
 interface Props {
   onTradeClick: (tradeId: bigint) => void
@@ -72,6 +74,10 @@ export function TraderDashboard({ onTradeClick, openRegister, onRegisterOpened, 
   return (
     <div className="mx-auto max-w-lg px-4 py-4">
       <h2 className="display mb-4 text-2xl font-bold" style={{ color: 'var(--ink)' }}>Trader Dashboard</h2>
+
+      {IS_ESCROW_V2 && isRegistered && profile && (
+        <TraderBond profile={profile} onChanged={() => { void refetchProfile() }} />
+      )}
 
       {/* Tabs */}
       <div className="flex rounded-xl p-1 mb-6" style={{ background: 'var(--surface-muted)' }}>

@@ -7,9 +7,12 @@ import {
   TradeStatus as TS,
   TRADE_STATUS_LABELS,
   Trade,
+  IS_ESCROW_V2,
+  CONFIRM_WINDOW_SECONDS,
 } from '../contracts/peetopee'
 import { Amount, usdcDecimalsFor } from '../onchain-money'
 import { TradeBankDetails } from './TradeBankDetails'
+import { DisputeEvidence } from './DisputeEvidence'
 
 interface Props {
   tradeId: bigint
@@ -65,12 +68,16 @@ export function TradeStatusScreen({ tradeId, onBack }: Props) {
   const { writeContract: cancelTrade, data: cancelTxHash, isPending: cancelPending } = useWriteContract()
   const { isLoading: cancelConfirming } = useWaitForTransactionReceipt({ hash: cancelTxHash })
 
+  // V2: trader claims after the seller's confirm window passes
+  const { writeContract: claimTrade, data: claimTxHash, isPending: claimPending } = useWriteContract()
+  const { isLoading: claimConfirming } = useWaitForTransactionReceipt({ hash: claimTxHash })
+
   // Rate trader
   const { writeContract: rateTrader, data: rateTxHash, isPending: ratePending } = useWriteContract()
   const { isLoading: rateConfirming } = useWaitForTransactionReceipt({ hash: rateTxHash })
 
   // Refetch after any tx confirmation
-  useEffect(() => { void refetch() }, [refetch, markTxHash, confirmTxHash, disputeTxHash, cancelTxHash, rateTxHash])
+  useEffect(() => { void refetch() }, [refetch, markTxHash, confirmTxHash, disputeTxHash, cancelTxHash, rateTxHash, claimTxHash])
 
   function doAction(fn: () => void) {
     if (wrongChain) { switchChain({ chainId: ARC_TESTNET_CHAIN_ID }); return }
@@ -187,6 +194,11 @@ export function TradeStatusScreen({ tradeId, onBack }: Props) {
         </div>
       )}
 
+      {/* Dispute evidence — both sides make their case to the admin */}
+      {(isSeller || isTrader) && isDisputed && (
+        <DisputeEvidence tradeId={tradeId} role={isTrader ? 'trader' : 'seller'} />
+      )}
+
       {/* Bank details — only the seller and trader can see them */}
       {(isSeller || isTrader) && (status === TS.Created || status === TS.FiatSent || status === TS.Disputed) && (
         <TradeBankDetails tradeId={tradeId} role={isTrader ? 'trader' : 'seller'} />
@@ -200,9 +212,38 @@ export function TradeStatusScreen({ tradeId, onBack }: Props) {
             label="Mark Fiat Sent"
             pending={markPending || markConfirming}
             onClick={() => doAction(() => markFiatSent({ ...PEETOPEE_ESCROW, functionName: 'markFiatSent', args: [tradeId] }))}
-            description="Confirm you have sent the local currency to the seller's bank account."
+            description="Confirm you have sent the local currency to the bank account shown above."
           />
         )}
+
+        {/* V2: confirm window — the seller must confirm or dispute in time */}
+        {IS_ESCROW_V2 && status === TS.FiatSent && (isSeller || isTrader) && (() => {
+          const deadline = Number(trade.fiatSentAt) + CONFIRM_WINDOW_SECONDS
+          const left = Math.max(0, deadline - nowSec)
+          const hrs = Math.floor(left / 3600)
+          const mins = Math.floor((left % 3600) / 60)
+          if (isTrader && left === 0) {
+            return (
+              <ActionButton
+                label="Claim USDC"
+                pending={claimPending || claimConfirming}
+                onClick={() => doAction(() => claimTrade({ ...PEETOPEE_ESCROW, functionName: 'claimAfterConfirmWindow', args: [tradeId] }))}
+                description="The seller didn't confirm or dispute within 48 hours of you marking the money sent, so you can now take the USDC."
+                success
+              />
+            )
+          }
+          return (
+            <div className="flex items-center gap-2 rounded-xl px-3 py-2.5" style={{ background: 'var(--surface-muted)' }}>
+              <Clock className="size-4 shrink-0" style={{ color: 'var(--muted)' }} />
+              <span className="text-xs" style={{ color: 'var(--muted)' }}>
+                {isSeller
+                  ? `Check your bank, then confirm or open a dispute within ${hrs}h ${mins}m. After that the trader can claim the USDC.`
+                  : `The seller has ${hrs}h ${mins}m to confirm. If they don't respond, you can claim the USDC.`}
+              </span>
+            </div>
+          )
+        })()}
 
         {/* Seller: confirm received */}
         {isSeller && status === TS.FiatSent && (
