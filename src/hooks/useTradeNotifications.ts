@@ -12,6 +12,7 @@
 import { useEffect, useRef } from 'react'
 import { useReadContract } from 'wagmi'
 import { PEETOPEE_ESCROW, ARC_TESTNET_CHAIN_ID, TradeStatus, Trade } from '../contracts/peetopee'
+import { notify as notifyAll } from '../notify/notify'
 
 const NOTIF_KEY = 'ptp_last_notified_trade'
 
@@ -22,26 +23,11 @@ function setLastNotified(id: bigint) {
   localStorage.setItem(NOTIF_KEY, id.toString())
 }
 
-async function requestPermission(): Promise<boolean> {
-  if (!('Notification' in window)) return false
-  if (Notification.permission === 'granted') return true
-  if (Notification.permission === 'denied') return false
-  const res = await Notification.requestPermission()
-  return res === 'granted'
-}
-
 function notify(title: string, body: string, tag: string) {
-  if (Notification.permission !== 'granted') return
-  new Notification(title, { body, tag, icon: '/icon-192.svg', badge: '/icon-192.svg' })
+  void notifyAll(title, body, tag)
 }
 
 export function useTradeNotifications(traderAddress?: string) {
-  const hasPermission = useRef(false)
-
-  // Ask for permission once on mount
-  useEffect(() => {
-    requestPermission().then(ok => { hasPermission.current = ok }).catch(() => {})
-  }, [])
 
   // Watch trader's incoming trade IDs
   const { data: rawTradeIds } = useReadContract({
@@ -54,7 +40,7 @@ export function useTradeNotifications(traderAddress?: string) {
 
   useEffect(() => {
     const tradeIds = (rawTradeIds as bigint[] | undefined) ?? []
-    if (!hasPermission.current || tradeIds.length === 0) return
+    if (tradeIds.length === 0) return
     const lastNotified = getLastNotified()
     const newIds = tradeIds.filter(id => id > lastNotified)
     if (newIds.length === 0) return

@@ -12,15 +12,20 @@ import { AvatarPicker } from './AvatarPicker'
 import { COUNTRIES } from '../contracts/peetopee'
 import { ApiError } from '../auth/ptpApi'
 import { KycFlow } from './KycFlow'
+import { notifyStatus, enableNotifications, disableNotifications, type NotifyStatus } from '../notify/notify'
 
 interface ProfileScreenProps {
   onBack: () => void
 }
 
 export function ProfileScreen({ onBack }: ProfileScreenProps) {
-  const { profile, updateProfile, signOut, changePtpId } = useAuth()
+  const { profile, updateProfile, saveProfileNow, signOut, changePtpId } = useAuth()
   const [editName, setEditName] = useState(profile?.name ?? '')
   const [saved, setSaved] = useState(false)
+  // A newly picked photo is shown right away but only kept once you tap Save.
+  const [pendingPhoto, setPendingPhoto] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState('')
   const [showCountry, setShowCountry] = useState(false)
   const [query, setQuery] = useState('')
 
@@ -40,11 +45,26 @@ export function ProfileScreen({ onBack }: ProfileScreenProps) {
     c.currency.toLowerCase().includes(query.toLowerCase())
   )
 
-  function handleSaveName() {
-    if (editName.trim().length < 2) return
-    updateProfile({ name: editName.trim() })
-    setSaved(true)
-    setTimeout(() => setSaved(false), 1800)
+  const nameChanged = editName.trim() !== profile.name && editName.trim().length >= 2
+  const canSave = (nameChanged || !!pendingPhoto) && !saving
+
+  async function handleSave() {
+    if (!canSave) return
+    setSaving(true)
+    setSaveError('')
+    try {
+      await saveProfileNow({
+        ...(nameChanged ? { name: editName.trim() } : {}),
+        ...(pendingPhoto ? { avatarDataUrl: pendingPhoto } : {}),
+      })
+      setPendingPhoto(null)
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2000)
+    } catch (e) {
+      setSaveError(e instanceof ApiError ? e.message : "Couldn't save. Check your connection and try again.")
+    } finally {
+      setSaving(false)
+    }
   }
 
   function copyPtpId() {
@@ -108,12 +128,12 @@ export function ProfileScreen({ onBack }: ProfileScreenProps) {
         </button>
         <h1 className="text-base font-bold flex-1" style={{ color: 'var(--ink)' }}>Profile</h1>
         <button
-          onClick={handleSaveName}
-          disabled={editName.trim() === profile.name || editName.trim().length < 2}
+          onClick={() => { void handleSave() }}
+          disabled={!canSave}
           className="text-sm font-semibold px-3 py-1.5 rounded-xl disabled:opacity-40 transition-all active:scale-95"
           style={{ color: saved ? 'var(--success)' : 'var(--accent)', background: 'var(--surface-muted)' }}
         >
-          {saved ? 'Saved ✓' : 'Save'}
+          {saving ? 'Saving…' : saved ? 'Saved ✓' : 'Save'}
         </button>
       </div>
 
@@ -126,10 +146,25 @@ export function ProfileScreen({ onBack }: ProfileScreenProps) {
         <div className="flex flex-col items-center gap-4 py-4">
           <AvatarPicker
             name={profile.name}
-            dataUrl={profile.avatarDataUrl}
-            onChange={dataUrl => updateProfile({ avatarDataUrl: dataUrl })}
+            dataUrl={pendingPhoto ?? profile.avatarDataUrl}
+            onChange={dataUrl => { setPendingPhoto(dataUrl); setSaveError('') }}
             size={96}
           />
+          {pendingPhoto && (
+            <div className="flex gap-2">
+              <button onClick={() => { void handleSave() }} disabled={saving}
+                className="rounded-xl px-5 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                style={{ background: 'var(--accent)' }}>
+                {saving ? 'Saving…' : 'Save photo'}
+              </button>
+              <button onClick={() => setPendingPhoto(null)} disabled={saving}
+                className="rounded-xl px-4 py-2 text-sm font-semibold" style={{ background: 'var(--surface-muted)', color: 'var(--ink)' }}>
+                Cancel
+              </button>
+            </div>
+          )}
+          {saved && !pendingPhoto && <p className="text-xs font-semibold" style={{ color: 'var(--success)' }}>Saved ✓ — people now see your new photo.</p>}
+          {saveError && <p className="text-xs" style={{ color: 'var(--danger)' }}>{saveError}</p>}
           <input
             type="text"
             value={editName}
@@ -373,16 +408,15 @@ export function ProfileScreen({ onBack }: ProfileScreenProps) {
 
         {/* Settings */}
         <div className="rounded-3xl overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+          <NotificationsRow />
           {[
-            { icon: Bell, label: 'Notifications', sub: 'Trade alerts and updates' },
             { icon: Shield, label: 'Security', sub: 'PIN and biometrics' },
-          ].map(({ icon: Icon, label, sub }, i) => (
+          ].map(({ icon: Icon, label, sub }) => (
             <button
               key={label}
               className="w-full px-4 py-3.5 flex items-center gap-3 active:opacity-70 transition-all"
               style={{
                 background: 'var(--surface-strong)',
-                borderBottom: i === 0 ? '1px solid var(--border)' : 'none',
               }}
             >
               <Icon className="size-4 shrink-0" style={{ color: 'var(--subtle)' }} />
@@ -406,5 +440,38 @@ export function ProfileScreen({ onBack }: ProfileScreenProps) {
         </button>
       </div>
     </div>
+  )
+}
+
+/** Turn "You received USDC" and trade alerts on or off on this device. */
+function NotificationsRow() {
+  const [status, setStatus] = useState<NotifyStatus>(() => notifyStatus())
+  const [busy, setBusy] = useState(false)
+  const sub = {
+    on: 'On — payments received and trade updates',
+    off: 'Off — tap to get alerts when you receive money',
+    blocked: 'Blocked in your browser settings — allow notifications for this site',
+    unsupported: "This browser can't show notifications (alerts still appear in the app)",
+  }[status]
+  async function toggle() {
+    if (status === 'on') { disableNotifications(); setStatus('off'); return }
+    if (status === 'unsupported') return
+    setBusy(true)
+    try { setStatus(await enableNotifications()) } finally { setBusy(false) }
+  }
+  return (
+    <button onClick={() => { void toggle() }} disabled={busy}
+      className="w-full px-4 py-3.5 flex items-center gap-3 active:opacity-70 transition-all"
+      style={{ background: 'var(--surface-strong)', borderBottom: '1px solid var(--border)' }}>
+      <Bell className="size-4 shrink-0" style={{ color: status === 'on' ? 'var(--accent)' : 'var(--subtle)' }} />
+      <div className="flex-1 text-left">
+        <p className="text-sm font-semibold" style={{ color: 'var(--ink)' }}>Notifications</p>
+        <p className="text-xs" style={{ color: status === 'blocked' ? 'var(--danger)' : 'var(--subtle)' }}>{sub}</p>
+      </div>
+      <span className="relative inline-flex h-6 w-11 shrink-0 rounded-full transition-colors"
+        style={{ background: status === 'on' ? 'var(--accent)' : 'var(--border)' }}>
+        <span className="absolute top-0.5 size-5 rounded-full bg-white shadow transition-all" style={{ left: status === 'on' ? 22 : 2 }} />
+      </span>
+    </button>
   )
 }

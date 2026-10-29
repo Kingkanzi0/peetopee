@@ -53,6 +53,9 @@ const RELAY_METHODS = new Set([
 ])
 const RELAY_MAX_BATCH = 20
 const EXPLORER_API = 'https://explorer.testnet.arc.io/api/v2'
+/** Tokens the wallet shows prices and logos for (CoinGecko ids). */
+export const PRICE_IDS = ['usd-coin', 'ethereum', 'bitcoin', 'solana', 'arbitrum', 'polygon-ecosystem-token', 'matic-network'] as const
+const PRICES_TTL_MS = 60_000
 const DEFAULT_ESCROW = '0x59417b13a4d545ff514642a1db1693f35652daea'
 
 const OTP_TTL_MS = 10 * 60_000
@@ -285,6 +288,8 @@ export interface ApiOptions {
   now?: () => number
   /** For tests: replaces the call to the Arc explorer. */
   fetchExplorer?: (url: string) => Promise<unknown>
+  /** For tests: replaces the call to CoinGecko. */
+  fetchPrices?: (url: string) => Promise<unknown>
 }
 
 type Json = Record<string, unknown>
@@ -998,6 +1003,35 @@ export function createApi(opts: ApiOptions) {
     }
   }
 
+  /**
+   * Token prices and logos from CoinGecko, cached for a minute and relayed so
+   * browser blockers and CoinGecko's per-visitor rate limits don't blank the wallet.
+   */
+  let priceCache: { at: number; tokens: unknown[] } | null = null
+  async function prices(ip: string) {
+    if (priceCache && now() - priceCache.at < PRICES_TTL_MS) return { ok: true, tokens: priceCache.tokens, cachedAt: priceCache.at }
+    rateLimitIp(`prices:${ip}`, 60, 60_000)
+    const fetcher = opts.fetchPrices ?? (async (url: string) => {
+      const res = await fetch(url, { signal: AbortSignal.timeout(8_000), headers: { accept: 'application/json' } })
+      if (!res.ok) throw new Error(`coingecko ${res.status}`)
+      return res.json()
+    })
+    try {
+      const url = `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${PRICE_IDS.join(',')}&price_change_percentage=24h`
+      const rows = await fetcher(url) as { id: string; symbol: string; name: string; image: string; current_price: number; price_change_percentage_24h: number | null }[]
+      if (!Array.isArray(rows) || rows.length === 0) throw new Error('empty')
+      const tokens = rows.map(r => ({
+        id: r.id, symbol: String(r.symbol).toUpperCase(), name: r.name, image: r.image,
+        price: r.current_price, change24h: r.price_change_percentage_24h ?? null,
+      }))
+      priceCache = { at: now(), tokens }
+      return { ok: true, tokens, cachedAt: priceCache.at }
+    } catch {
+      if (priceCache) return { ok: true, tokens: priceCache.tokens, cachedAt: priceCache.at, stale: true }
+      throw new HttpError(502, 'Prices are unavailable right now.')
+    }
+  }
+
   // ── router ────────────────────────────────────────────────────────────────
 
   async function readBody(req: Request): Promise<Json> {
@@ -1018,6 +1052,7 @@ export function createApi(opts: ApiOptions) {
       if (route === '/health') return json({ ok: true, ts: now() })
       if (m === 'POST' && route === '/rpc') return await rpcRelay(req, ip)
       if (m === 'GET' && route === '/history') return json(await historyRelay(url.searchParams.get('address') ?? '', ip))
+      if (m === 'GET' && route === '/prices') return json(await prices(ip))
 
       if (m === 'POST' && route === '/auth/request-otp') return json(await requestOtp(await readBody(req), ip))
       if (m === 'POST' && route === '/auth/verify-otp') return json(verifyOtp(await readBody(req)))
