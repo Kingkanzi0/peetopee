@@ -43,8 +43,8 @@ services:
       #   value: "0x..."
       # Escrow contract the server checks trades against. Leave unset for V1;
       # after deploying PeetopeeEscrowV2, set ESCROW_ADDRESS to its address here.
-      # - key: ESCROW_ADDRESS
-      #   value: "0x..."
+      - key: ESCROW_ADDRESS
+        value: "0xb809f0aaf4d532056d011c1658d5c391873f9ba1"
       # Secret for the ID review page. Render generates it; copy it from the dashboard.
       - key: ADMIN_TOKEN
         generateValue: true

@@ -9,7 +9,7 @@ const ESCROW_V1_ADDRESS = '0x59417b13a4d545ff514642a1db1693f35652daea'
  * Leave empty until V2 is deployed; then paste its address here and redeploy the
  * app. Everything V2-specific in the UI switches on automatically.
  */
-const ESCROW_V2_ADDRESS = ''
+const ESCROW_V2_ADDRESS = '0xb809f0aaf4d532056d011c1658d5c391873f9ba1'
 
 export const ESCROW_VERSION: 1 | 2 = ESCROW_V2_ADDRESS ? 2 : 1
 export const IS_ESCROW_V2 = ESCROW_VERSION === 2

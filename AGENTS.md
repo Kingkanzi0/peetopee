@@ -22,7 +22,8 @@ Peetopee is a peer-to-peer marketplace where sellers lock USDC in escrow and loc
 
 | Contract | Network | Address | Explorer |
 |---|---|---|---|
-| PeetopeeEscrow | Arc Testnet | 0x59417b13a4d545ff514642a1db1693f35652daea | https://explorer.testnet.arc.io/address/0x59417b13a4d545ff514642a1db1693f35652daea |
+| PeetopeeEscrow (V1, retired; admin is Arc Studio's deployer) | Arc Testnet | 0x59417b13a4d545ff514642a1db1693f35652daea | https://explorer.testnet.arc.io/address/0x59417b13a4d545ff514642a1db1693f35652daea |
+| **PeetopeeEscrowV2 (live)** — admin & treasury = operator's Funds account 0xAB0aAa2dD3D581bd3759d6CDc1e588DE97D16a21, fee 50 bps, min bond 50 USDC | Arc Testnet | 0xb809f0aaf4d532056d011c1658d5c391873f9ba1 | https://explorer.testnet.arc.io/address/0xb809f0aaf4d532056d011c1658d5c391873f9ba1 |
 
 ## Constructor Args Used
 
