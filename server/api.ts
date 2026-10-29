@@ -400,6 +400,15 @@ export function migrate(db: Database) {
       created_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS trade_evidence_trade ON trade_evidence(trade_id);
+    CREATE TABLE IF NOT EXISTS trade_chat (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      trade_id   TEXT NOT NULL,
+      role       TEXT NOT NULL,                -- seller | trader
+      author     TEXT NOT NULL,                -- contact of the sender
+      body       TEXT NOT NULL,                -- encrypted message text
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS trade_chat_trade ON trade_chat(trade_id, id);
     CREATE TABLE IF NOT EXISTS payouts (
       payout_id    TEXT NOT NULL,              -- id in the naira contract
       contract     TEXT NOT NULL,              -- naira contract address
@@ -772,6 +781,57 @@ export function createApi(opts: ApiOptions) {
     return { ok: true, evidence: evidenceFor(tradeId) }
   }
 
+  // ── trade chat (seller ⇄ trader) ──────────────────────────────────────────
+
+  const MAX_CHAT_TEXT = 1_000
+  const MAX_CHAT_PER_TRADE = 500
+  /** Seller and trader never change once a trade exists, so cache them (fewer chain reads while polling). */
+  const tradeParties = new Map<string, OnchainTrade>()
+
+  async function tradeFor(tradeIdRaw: unknown): Promise<{ tradeId: bigint; trade: OnchainTrade }> {
+    let tradeId: bigint
+    try { tradeId = BigInt(String(tradeIdRaw)) } catch { throw new HttpError(400, 'Invalid trade.') }
+    const key = tradeId.toString()
+    let trade = tradeParties.get(key)
+    if (!trade) {
+      const fresh = await readTrade(tradeId)
+      if (!fresh) throw new HttpError(404, 'Trade not found.')
+      trade = fresh
+      tradeParties.set(key, trade)
+      if (tradeParties.size > 5_000) tradeParties.delete(tradeParties.keys().next().value!)
+    }
+    return { tradeId, trade }
+  }
+
+  function chatSince(tradeId: bigint, afterId: number) {
+    return db.query<{ id: number; role: string; body: string; created_at: number }, [string, number]>(
+      'SELECT id, role, body, created_at FROM trade_chat WHERE trade_id = ? AND id > ? ORDER BY id ASC LIMIT 200')
+      .all(tradeId.toString(), afterId)
+      .map(r => ({ id: r.id, role: r.role, text: decrypt(dataKey, r.body), createdAt: r.created_at }))
+  }
+
+  async function postChat(contact: string, body: Json, ip: string) {
+    const text = String(body.text ?? '').trim().slice(0, MAX_CHAT_TEXT)
+    if (!text) throw new HttpError(400, 'Type a message.')
+    rateLimitIp(`chat:${contact}:${ip}`, 30, 60_000)
+    const { tradeId, trade } = await tradeFor(body.tradeId)
+    const role = roleIn(contact, trade)
+    if (!role) throw new HttpError(403, 'Only the seller and trader can chat on this trade.')
+    const count = db.query<{ n: number }, string>('SELECT count(*) AS n FROM trade_chat WHERE trade_id = ?').get(tradeId.toString())
+    if ((count?.n ?? 0) >= MAX_CHAT_PER_TRADE) throw new HttpError(429, 'This chat is full.')
+    const res = db.query('INSERT INTO trade_chat (trade_id, role, author, body, created_at) VALUES (?,?,?,?,?)')
+      .run(tradeId.toString(), role, contact, encrypt(dataKey, text), now())
+    return { ok: true, message: { id: Number(res.lastInsertRowid), role, text, createdAt: now() } }
+  }
+
+  async function listChat(contact: string, tradeIdRaw: string, afterRaw: string) {
+    const { tradeId, trade } = await tradeFor(tradeIdRaw)
+    const role = roleIn(contact, trade)
+    if (!role) throw new HttpError(403, 'Only the seller and trader can read this chat.')
+    const after = Math.max(0, parseInt(afterRaw || '0', 10) || 0)
+    return { ok: true, myRole: role, messages: chatSince(tradeId, after) }
+  }
+
   /** Everything the admin needs to decide a dispute. */
   async function adminDispute(tradeIdRaw: string) {
     let tradeId: bigint
@@ -791,6 +851,7 @@ export function createApi(opts: ApiOptions) {
       trader: who(trade.trader),
       bankDetails: details ? decrypt(dataKey, details.details) : null,
       evidence: evidenceFor(tradeId),
+      chat: chatSince(tradeId, 0),
     }
   }
 
@@ -1077,6 +1138,8 @@ export function createApi(opts: ApiOptions) {
       if (m === 'GET' && route === '/admin/payouts') { requireAdmin(req); return json(adminListPayouts(url.searchParams.get('status') ?? 'processing')) }
       const payoutMatch = route.match(/^\/admin\/payouts\/(\d+)$/)
       if (m === 'POST' && payoutMatch) { requireAdmin(req); return json(adminUpdatePayout(payoutMatch[1], await readBody(req))) }
+      if (m === 'POST' && route === '/trade-chat') return json(await postChat(sessionContact(req), await readBody(req), ip))
+      if (m === 'GET' && route === '/trade-chat') return json(await listChat(sessionContact(req), url.searchParams.get('tradeId') ?? '', url.searchParams.get('after') ?? '0'))
       if (m === 'GET' && route === '/admin/dispute') { requireAdmin(req); return json(await adminDispute(url.searchParams.get('tradeId') ?? '')) }
 
       const adminMatch = route.match(/^\/admin\/kyc(?:\/(\d+))?$/)

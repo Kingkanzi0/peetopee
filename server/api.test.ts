@@ -523,6 +523,47 @@ describe('dispute evidence', () => {
   })
 })
 
+describe('trade chat', () => {
+  async function trade() {
+    const seller = await signUp('a@b.co', 'Alice', '@alice')
+    await link(seller.token, seller.ptpId, aliceFunds, 'funds')
+    const trader = await signUp('b@b.co', 'Bob', '@bob')
+    await link(trader.token, trader.ptpId, bob, 'funds')
+    const stranger = await signUp('m@b.co', 'Mallory', '@mallory')
+    await link(stranger.token, stranger.ptpId, mallory, 'funds')
+    chainTrades.set(4n, encodeTrade({ id: 4n, seller: aliceFunds.address, trader: bob.address, bankDetails: '0x00', status: 0 }))
+    return { seller, trader, stranger }
+  }
+
+  test('seller and trader see each other\'s messages; strangers cannot', async () => {
+    const { seller, trader, stranger } = await trade()
+    const a = await call('POST', '/trade-chat', { tradeId: '4', text: 'Hi, sending details now' }, auth(seller.token))
+    expect(a.status).toBe(200)
+    expect(a.body.message.role).toBe('seller')
+    await call('POST', '/trade-chat', { tradeId: '4', text: 'Paid, check your OPay' }, auth(trader.token))
+
+    const forTrader = await call('GET', '/trade-chat?tradeId=4', undefined, auth(trader.token))
+    expect(forTrader.body.myRole).toBe('trader')
+    expect(forTrader.body.messages.map((m: any) => [m.role, m.text])).toEqual([
+      ['seller', 'Hi, sending details now'], ['trader', 'Paid, check your OPay'],
+    ])
+    const since = await call('GET', `/trade-chat?tradeId=4&after=${forTrader.body.messages[0].id}`, undefined, auth(seller.token))
+    expect(since.body.messages).toHaveLength(1)
+
+    expect((await call('GET', '/trade-chat?tradeId=4', undefined, auth(stranger.token))).status).toBe(403)
+    expect((await call('POST', '/trade-chat', { tradeId: '4', text: 'hi' }, auth(stranger.token))).status).toBe(403)
+    expect((await call('POST', '/trade-chat', { tradeId: '4', text: '   ' }, auth(seller.token))).status).toBe(400)
+    expect((await call('GET', '/trade-chat?tradeId=4')).status).toBe(401)
+  })
+
+  test('the admin sees the chat when deciding a dispute', async () => {
+    const { seller } = await trade()
+    await call('POST', '/trade-chat', { tradeId: '4', text: 'Where is my money?' }, auth(seller.token))
+    const r = await call('GET', '/admin/dispute?tradeId=4', undefined, { 'X-Admin-Token': 'admin-secret' })
+    expect(r.body.chat[0].text).toBe('Where is my money?')
+  })
+})
+
 // ── naira account payouts ───────────────────────────────────────────────────
 
 describe('naira payouts', () => {

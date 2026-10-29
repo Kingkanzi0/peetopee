@@ -118,7 +118,8 @@ Server tests: `cd server && bun install && bun test`
 - `src/components/SellFlow.tsx` — amount entry → bank details → confirm → escrow lock
 - `src/components/TradeStatus.tsx` — live trade status, actions (markFiatSent, confirmReceived, dispute, cancel, rate)
 - `src/components/TraderDashboard.tsx` — trader registration + incoming orders
-- `src/components/TradeChat.tsx` — in-trade chat (localStorage, local only for demo)
+- `src/components/TradeChat.tsx` + `src/hooks/useTradeChat.ts` — seller ⇄ trader chat via the server (`/trade-chat`, encrypted at rest, only the two parties; the admin sees it in disputes)
+- `src/wallet/BackupWallet.tsx` — "Back up wallet": PIN re-check, then the recovery phrase (kept encrypted since this update) or, for older wallets, the private key; reminder banner until confirmed
 - `src/components/TradeBankDetails.tsx` — shows a trade's bank details to its seller/trader
 - `src/components/FundsScreen.tsx` — Funds + Wallet balances in USDC and the visiting country's currency; Wallet ↔ Funds moves
 - `src/components/SendUsdcByPtpId.tsx` — send USDC by @handle with live lookup + avatar

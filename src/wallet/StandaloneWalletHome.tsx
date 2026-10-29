@@ -18,6 +18,7 @@ import { recordTx, shortAddr } from '../history/txHistory'
 import { friendlyTxError } from './appWallet'
 import { useTokenPrices, idForSymbol, type TokenMeta } from './useTokenPrices'
 import { TokenIcon, formatUsdPrice } from './TokenIcon'
+import { BackupCard } from './BackupWallet'
 import { QRCodeSVG } from 'qrcode.react'
 
 type Sheet = 'send' | 'receive' | 'swap' | null
@@ -275,6 +276,9 @@ export function StandaloneWalletHome({ wallet, onDelete, onBack }: Props) {
           Get test USDC →
         </a>
       </div>
+
+      {/* Backup */}
+      <BackupCard />
 
       {/* Delete wallet */}
       <button

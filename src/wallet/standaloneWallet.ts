@@ -30,6 +30,8 @@ const KEY_ENCRYPTED = 'ptp_wallet_key_enc'
 const KEY_ADDRESS = 'ptp_wallet_address'
 const KEY_FUNDS_ADDRESS = 'ptp_funds_address'
 const KEY_LABEL   = 'ptp_wallet_label'
+const KEY_MNEMONIC_ENC = 'ptp_wallet_mnemonic_enc' // recovery phrase, encrypted like the key (wallets created after the backup update)
+const KEY_BACKED_UP = 'ptp_wallet_backed_up'
 
 export interface StoredWallet {
   address: Address
@@ -118,8 +120,12 @@ async function decryptKey(blob: string): Promise<Hex> {
   return new TextDecoder().decode(pt) as Hex
 }
 
-/** Encrypt and store a new wallet key, and keep it unlocked for this session. */
-export async function saveWallet(privKey: Hex, label: 'created' | 'imported') {
+/**
+ * Encrypt and store a new wallet key, and keep it unlocked for this session.
+ * `mnemonic` (when the wallet came from a recovery phrase) is stored encrypted
+ * too, so "Back up wallet" can show the 12 words again later.
+ */
+export async function saveWallet(privKey: Hex, label: 'created' | 'imported', mnemonic?: string, backedUp = label === 'imported') {
   const account = privateKeyToAccount(privKey)
   const funds = privateKeyToAccount(deriveFundsKey(privKey))
   try {
@@ -130,9 +136,15 @@ export async function saveWallet(privKey: Hex, label: 'created' | 'imported') {
     console.warn('[wallet] device encryption unavailable, storing key unencrypted', e)
     localStorage.setItem(KEY_PRIVATE_LEGACY, privKey)
   }
+  try {
+    if (mnemonic) localStorage.setItem(KEY_MNEMONIC_ENC, await encryptKey(mnemonic.trim() as Hex))
+    else localStorage.removeItem(KEY_MNEMONIC_ENC)
+  } catch { localStorage.removeItem(KEY_MNEMONIC_ENC) /* the private key still works as a backup */ }
   localStorage.setItem(KEY_ADDRESS, account.address)
   localStorage.setItem(KEY_FUNDS_ADDRESS, funds.address)
   localStorage.setItem(KEY_LABEL, label)
+  if (backedUp) localStorage.setItem(KEY_BACKED_UP, '1')
+  else localStorage.removeItem(KEY_BACKED_UP)
   unlockedKey = privKey
   notify()
   return account.address
@@ -176,7 +188,7 @@ export function lockWallet() {
 }
 
 export function deleteWallet() {
-  for (const k of [KEY_PRIVATE_LEGACY, KEY_ENCRYPTED, KEY_ADDRESS, KEY_FUNDS_ADDRESS, KEY_LABEL]) localStorage.removeItem(k)
+  for (const k of [KEY_PRIVATE_LEGACY, KEY_ENCRYPTED, KEY_ADDRESS, KEY_FUNDS_ADDRESS, KEY_LABEL, KEY_MNEMONIC_ENC, KEY_BACKED_UP]) localStorage.removeItem(k)
   unlockedKey = null
   notify()
 }
@@ -184,6 +196,29 @@ export function deleteWallet() {
 /** The main wallet key, or null if no wallet / not unlocked yet. */
 export function getPrivateKey(): Hex | null {
   return unlockedKey
+}
+
+/**
+ * What the user needs to restore this wallet on another device. Only call after
+ * re-checking the PIN. `phrase` is null for wallets created before phrases were
+ * kept (or imported with a private key); the private key restores those.
+ */
+export async function getBackupSecret(): Promise<{ phrase: string | null; privateKey: Hex }> {
+  if (!unlockedKey) throw new Error('Unlock Peetopee with your PIN first.')
+  let phrase: string | null = null
+  const blob = safeGet(KEY_MNEMONIC_ENC)
+  if (blob) { try { phrase = await decryptKey(blob) } catch { phrase = null } }
+  return { phrase, privateKey: unlockedKey }
+}
+
+/** Has the user confirmed they saved their recovery phrase / key? */
+export function isWalletBackedUp() {
+  return safeGet(KEY_BACKED_UP) === '1'
+}
+
+export function markWalletBackedUp() {
+  try { localStorage.setItem(KEY_BACKED_UP, '1') } catch { /* ignore */ }
+  notify()
 }
 
 /** The trading (Funds) account key, or null if not unlocked. */
