@@ -404,7 +404,7 @@ function TopUpFunds({ shortfall, onDone, onAddFunds }: { shortfall: number; onDo
   return (
     <div className="mt-3 rounded-2xl p-3" style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)' }}>
       <div className="flex items-center gap-3">
-        <p className="flex-1 text-xs" style={{ color: '#92400e' }}>
+        <p className="flex-1 text-xs" style={{ color: 'var(--warn-ink)' }}>
           {canCover
             ? `You need ${need.toFixed(2)} more USDC in Funds. Move it from your Wallet?`
             : `You need ${need.toFixed(2)} more USDC. Your Wallet doesn't have enough either — add USDC first.`}

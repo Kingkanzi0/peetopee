@@ -223,7 +223,7 @@ function MainApp() {
           className="fixed bottom-0 left-0 right-0 z-20 flex items-stretch justify-around px-1"
           style={{
             display: showProfile ? 'none' : undefined,
-            background: 'rgba(255,255,255,0.96)',
+            background: 'var(--nav-bg)',
             backdropFilter: 'blur(24px)',
             WebkitBackdropFilter: 'blur(24px)',
             borderTop: '1px solid var(--border)',
@@ -256,11 +256,11 @@ function NavTab({ active, label, icon, onClick }: {
     <button
       onClick={onClick}
       className="flex flex-1 flex-col items-center justify-center gap-0.5 py-2 min-h-[44px] transition-all active:scale-95"
-      style={{ color: active ? '#1d4ed8' : 'var(--subtle)' }}
+      style={{ color: active ? 'var(--nav-active)' : 'var(--subtle)' }}
     >
       <div
         className="flex size-8 items-center justify-center rounded-xl transition-all"
-        style={{ background: active ? 'rgba(29,78,216,0.1)' : 'transparent' }}
+        style={{ background: active ? 'var(--nav-active-bg)' : 'transparent' }}
       >
         {icon}
       </div>

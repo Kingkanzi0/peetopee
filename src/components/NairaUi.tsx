@@ -28,7 +28,7 @@ export function Notice({ tone, children }: { tone: 'warn' | 'error' | 'info'; ch
   const c = tone === 'error'
     ? { bg: 'rgba(186,43,76,0.06)', border: 'rgba(186,43,76,0.15)', fg: 'var(--danger)' }
     : tone === 'warn'
-      ? { bg: 'rgba(245,158,11,0.08)', border: 'rgba(245,158,11,0.25)', fg: '#92400e' }
+      ? { bg: 'rgba(245,158,11,0.08)', border: 'rgba(245,158,11,0.25)', fg: 'var(--warn-ink)' }
       : { bg: 'rgba(29,78,216,0.06)', border: 'rgba(29,78,216,0.15)', fg: 'var(--ink)' }
   return (
     <div className="rounded-xl px-3 py-2.5 mb-4 flex items-start gap-2 text-xs" style={{ background: c.bg, border: `1px solid ${c.border}`, color: c.fg }}>

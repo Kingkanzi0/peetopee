@@ -76,7 +76,7 @@ export function TraderBond({ profile, onChanged }: { profile: TraderProfile; onC
           <input value={amount} inputMode="decimal" placeholder={mode === 'deposit' ? 'Amount to add' : `Max ${formatUnits(maxWithdraw, 6)}`}
             onChange={e => { const v = e.target.value.replace(/[^0-9.]/g, ''); if (/^\d*\.?\d{0,6}$/.test(v)) setAmount(v) }}
             className="flex-1 min-w-0 rounded-xl px-3 py-2 outline-none"
-            style={{ background: 'white', border: '1px solid var(--border)', color: 'var(--ink)', fontSize: 16 }} />
+            style={{ background: 'var(--chip)', border: '1px solid var(--border)', color: 'var(--ink)', fontSize: 16 }} />
           <button onClick={start} disabled={busy || raw <= 0n || (mode === 'withdraw' && raw > maxWithdraw)}
             className="rounded-xl px-4 text-sm font-semibold text-white disabled:opacity-40 flex items-center gap-1.5" style={{ background: 'var(--accent)' }}>
             {busy && <Loader2 className="size-4 animate-spin" />}
@@ -92,7 +92,7 @@ export function TraderBond({ profile, onChanged }: { profile: TraderProfile; onC
           </button>
           {bond > 0n && (
             <button onClick={() => setMode('withdraw')} disabled={maxWithdraw === 0n}
-              className="rounded-xl px-3 py-2 text-xs font-semibold disabled:opacity-40" style={{ background: 'white', color: 'var(--ink)' }}>
+              className="rounded-xl px-3 py-2 text-xs font-semibold disabled:opacity-40" style={{ background: 'var(--chip)', color: 'var(--ink)' }}>
               Withdraw
             </button>
           )}

@@ -95,7 +95,7 @@ function AdminAccess({ adminAddr, myAddr, hasWallet }: { adminAddr?: string; myA
     ? `Using the deployer wallet that is the current admin of PeetopeeEscrow at ${PEETOPEE_ESCROW_ADDRESS} on Arc Testnet, call transferAdmin(${myAddr}). Then confirm admin() returns ${myAddr}.`
     : ''
   return (
-    <div className="rounded-xl p-3 text-xs space-y-2" style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)', color: '#92400e' }}>
+    <div className="rounded-xl p-3 text-xs space-y-2" style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)', color: 'var(--warn-ink)' }}>
       <p>
         You can review disputes, but only the escrow admin ({adminAddr.slice(0, 6)}…{adminAddr.slice(-4)}) can resolve them.
         {myAddr
@@ -106,9 +106,9 @@ function AdminAccess({ adminAddr, myAddr, hasWallet }: { adminAddr?: string; myA
       </p>
       {prompt && (
         <div className="flex items-start gap-2">
-          <code className="flex-1 rounded-lg p-2 break-all" style={{ background: 'white', color: 'var(--ink)' }}>{prompt}</code>
+          <code className="flex-1 rounded-lg p-2 break-all" style={{ background: 'var(--chip)', color: 'var(--ink)' }}>{prompt}</code>
           <button onClick={() => { void navigator.clipboard.writeText(prompt).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000) }) }}
-            className="rounded-lg p-2" style={{ background: 'white' }} aria-label="Copy prompt">
+            className="rounded-lg p-2" style={{ background: 'var(--chip)' }} aria-label="Copy prompt">
             {copied ? <Check className="size-4 text-green-600" /> : <Copy className="size-4" />}
           </button>
         </div>

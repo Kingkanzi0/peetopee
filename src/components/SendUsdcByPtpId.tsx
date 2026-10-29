@@ -220,7 +220,7 @@ export function SendUsdcByPtpId({ onBack }: Props) {
               {([true, false] as const).map(local => (
                 <button key={String(local)} onClick={() => { setInLocal(local); setAmount('') }}
                   className="rounded-md px-2.5 py-1 text-xs font-semibold"
-                  style={{ background: inLocal === local ? 'white' : 'transparent', color: inLocal === local ? 'var(--ink)' : 'var(--muted)' }}>
+                  style={{ background: inLocal === local ? 'var(--chip)' : 'transparent', color: inLocal === local ? 'var(--ink)' : 'var(--muted)' }}>
                   {local ? money.country!.currency : 'USDC'}
                 </button>
               ))}
@@ -341,7 +341,7 @@ export function SendUsdcByPtpId({ onBack }: Props) {
         <div className="rounded-2xl px-4 py-3 mb-4 flex items-start gap-2"
           style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)' }}>
           <Wallet className="size-4 mt-0.5 shrink-0" style={{ color: '#d97706' }} />
-          <p className="text-xs" style={{ color: '#92400e' }}>Create a wallet in the Wallet tab first to send USDC.</p>
+          <p className="text-xs" style={{ color: 'var(--warn-ink)' }}>Create a wallet in the Wallet tab first to send USDC.</p>
         </div>
       )}
 

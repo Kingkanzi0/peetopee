@@ -263,9 +263,9 @@ export function StandaloneWalletHome({ wallet, onDelete, onBack }: Props) {
       </div>
 
       {/* Faucet card */}
-      <div className="rounded-2xl p-4" style={{ background: '#eff6ff', border: '1px solid #bfdbfe' }}>
-        <p className="text-xs font-semibold text-blue-800 mb-1">Need test USDC?</p>
-        <p className="text-xs text-blue-700 mb-3">Get free test USDC for Arc Testnet, Base Sepolia, and other testnets from the Circle faucet.</p>
+      <div className="rounded-2xl p-4" style={{ background: 'var(--info-bg)', border: '1px solid var(--info-border)' }}>
+        <p className="text-xs font-semibold mb-1" style={{ color: 'var(--info-ink)' }}>Need test USDC?</p>
+        <p className="text-xs mb-3" style={{ color: 'var(--info-ink)' }}>Get free test USDC for Arc Testnet, Base Sepolia, and other testnets from the Circle faucet.</p>
         <a
           href={`https://faucet.circle.com/?address=${wallet.address}`}
           target="_blank" rel="noopener noreferrer"
@@ -575,7 +575,7 @@ function SendSheet({
             />
 
             {(errMsg || step === 'error') && (
-              <div className="flex gap-2 rounded-xl p-3" style={{ background: '#fef2f2' }}>
+              <div className="flex gap-2 rounded-xl p-3" style={{ background: 'var(--danger-bg)' }}>
                 <AlertTriangle className="size-4 shrink-0 text-red-500 mt-0.5" />
                 <p className="text-xs text-red-700">{errMsg}</p>
               </div>

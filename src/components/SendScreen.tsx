@@ -151,7 +151,7 @@ export function SendScreen({ onPayBank, start = 'choose' }: Props) {
 function ComingSoon({ icon, title, text }: { icon: React.ReactNode; title: string; text: string }) {
   return (
     <div className="flex items-start gap-3 py-2 opacity-70">
-      <div className="size-8 rounded-xl flex items-center justify-center shrink-0" style={{ background: 'white', color: '#059669' }}>{icon}</div>
+      <div className="size-8 rounded-xl flex items-center justify-center shrink-0" style={{ background: 'var(--chip)', color: '#059669' }}>{icon}</div>
       <div>
         <div className="text-sm font-semibold" style={{ color: 'var(--ink)' }}>{title}</div>
         <div className="text-xs" style={{ color: 'var(--muted)' }}>{text}</div>

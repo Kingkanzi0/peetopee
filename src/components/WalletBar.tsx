@@ -2,6 +2,8 @@ import { PeetopeeLogoSVG } from './PeetopeeLogoSVG'
 import { useAuth } from '../auth/AuthContext'
 import { useAppWallet, useUsdcBalance } from '../wallet/appWallet'
 import { useMoney } from '../hooks/useMoney'
+import { useTheme } from '../theme/theme'
+import { Sun, Moon } from 'lucide-react'
 
 function getInitials(name: string) {
   return name.trim().split(/\s+/).slice(0, 2).map(w => w[0]?.toUpperCase() ?? '').join('')
@@ -20,6 +22,7 @@ export function WalletBar({ onProfileOpen }: WalletBarProps) {
   const funds = useUsdcBalance(wallet && wallet.fundsAddress !== wallet.address ? wallet.fundsAddress : null)
   const total = main.balance == null ? null : main.balance + (funds.balance ?? 0)
   const money = useMoney()
+  const { theme, toggle: toggleTheme } = useTheme()
 
   const shortAddr = address ? `${address.slice(0, 6)}…${address.slice(-4)}` : null
 
@@ -27,7 +30,7 @@ export function WalletBar({ onProfileOpen }: WalletBarProps) {
     <header
       className="sticky top-0 z-30 w-full"
       style={{
-        background: 'rgba(255,255,255,0.93)',
+        background: 'var(--nav-bg)',
         backdropFilter: 'blur(20px)',
         WebkitBackdropFilter: 'blur(20px)',
         borderBottom: '1px solid var(--border)',
@@ -37,7 +40,7 @@ export function WalletBar({ onProfileOpen }: WalletBarProps) {
       <div className="flex items-center justify-between px-4 py-2.5" style={{ maxWidth: 512, margin: '0 auto' }}>
         {/* Logo */}
         <div className="shrink-0 mr-2">
-          <PeetopeeLogoSVG size="sm" variant="horizontal" on="light" />
+          <PeetopeeLogoSVG size="sm" variant="horizontal" on={theme} />
         </div>
 
         {/* Right side */}
@@ -66,6 +69,13 @@ export function WalletBar({ onProfileOpen }: WalletBarProps) {
               <span className="font-mono text-xs" style={{ color: 'var(--ink)' }}>{shortAddr}</span>
             </div>
           )}
+
+          {/* Light / dark mode */}
+          <button onClick={toggleTheme} aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            className="size-8 rounded-xl flex items-center justify-center shrink-0 active:scale-95 transition-all"
+            style={{ background: 'var(--surface-muted)', color: 'var(--ink)' }}>
+            {theme === 'dark' ? <Sun className="size-4" /> : <Moon className="size-4" />}
+          </button>
 
           {/* Profile avatar */}
           {profile && onProfileOpen && (

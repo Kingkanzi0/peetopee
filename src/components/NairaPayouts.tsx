@@ -230,7 +230,7 @@ export function NairaBills({ contract, balance, onDone, onBack }: Shared) {
       <div className="grid grid-cols-4 gap-1 rounded-xl p-1 mb-5" style={{ background: 'var(--surface-muted)' }}>
         {(['airtime', 'data', 'electricity', 'tv'] as BillKind[]).map(k => (
           <button key={k} onClick={() => switchKind(k)} className="rounded-lg py-2 text-xs font-semibold"
-            style={{ background: kind === k ? 'white' : 'transparent', color: kind === k ? 'var(--ink)' : 'var(--muted)' }}>
+            style={{ background: kind === k ? 'var(--chip)' : 'transparent', color: kind === k ? 'var(--ink)' : 'var(--muted)' }}>
             {k === 'tv' ? 'TV' : k === 'electricity' ? 'Power' : k[0].toUpperCase() + k.slice(1)}
           </button>
         ))}
