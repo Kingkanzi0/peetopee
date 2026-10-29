@@ -27,6 +27,9 @@ import { lockWallet } from './wallet/standaloneWallet'
 import { useWalletSession } from './wallet/useWalletSession'
 import type { SendStart } from './components/SendScreen'
 import { useNairaConfig } from './naira/nairaToken'
+import { useIncomingFunds } from './hooks/useIncomingFunds'
+import { initNotifications } from './notify/notify'
+import { useAppWallet } from './wallet/appWallet'
 
 type Screen =
   | { id: 'market' }
@@ -93,6 +96,9 @@ function MainApp() {
 
   useTradeNotifications(address)
   useWalletLink() // registers the built-in wallet's addresses with your Peetopee ID (automatic)
+  const { wallet } = useAppWallet()
+  useIncomingFunds(wallet?.address, wallet?.fundsAddress) // "You received USDC" alerts
+  useEffect(() => { initNotifications() }, [])
 
   const [chatOpen, setChatOpen] = useState(false)
   const [chatTradeId, setChatTradeId] = useState<bigint | null>(null)

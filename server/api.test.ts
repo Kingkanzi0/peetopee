@@ -619,3 +619,24 @@ describe('naira payouts', () => {
     expect((await call('POST', '/payouts', { payoutId: '1', details: bad }, auth(a.token))).status).toBe(400)
   })
 })
+
+describe('prices relay', () => {
+  test('returns CoinGecko markets with logos and caches them', async () => {
+    let calls = 0
+    setup({ fetchPrices: async (url: string) => {
+      calls++
+      expect(url).toContain('coins/markets')
+      return [{ id: 'bitcoin', symbol: 'btc', name: 'Bitcoin', image: 'https://img/btc.png', current_price: 70000, price_change_percentage_24h: 1.5 }]
+    } })
+    const a = await call('GET', '/prices')
+    expect(a.status).toBe(200)
+    expect(a.body.tokens[0]).toEqual({ id: 'bitcoin', symbol: 'BTC', name: 'Bitcoin', image: 'https://img/btc.png', price: 70000, change24h: 1.5 })
+    await call('GET', '/prices')
+    expect(calls).toBe(1)
+  })
+
+  test('502 when CoinGecko is down and nothing is cached', async () => {
+    setup({ fetchPrices: async () => { throw new Error('down') } })
+    expect((await call('GET', '/prices')).status).toBe(502)
+  })
+})

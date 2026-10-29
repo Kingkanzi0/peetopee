@@ -16,7 +16,8 @@ import {
 } from './standaloneWallet'
 import { recordTx, shortAddr } from '../history/txHistory'
 import { friendlyTxError } from './appWallet'
-import { useTokenPrices } from './useTokenPrices'
+import { useTokenPrices, idForSymbol, type TokenMeta } from './useTokenPrices'
+import { TokenIcon, formatUsdPrice } from './TokenIcon'
 import { QRCodeSVG } from 'qrcode.react'
 
 type Sheet = 'send' | 'receive' | 'swap' | null
@@ -34,7 +35,7 @@ export function StandaloneWalletHome({ wallet, onDelete, onBack }: Props) {
   const [loadingBalances, setLoadingBalances] = useState(true)
   const [expandedChain, setExpandedChain] = useState<number>(5042002)
   const [refreshKey, setRefreshKey] = useState(0)
-  const { prices } = useTokenPrices()
+  const { prices, tokens } = useTokenPrices()
 
   // Fetch all balances (all chains in parallel, so one slow network doesn't hold up the rest)
   const fetchAll = useCallback(async () => {
@@ -239,7 +240,7 @@ export function StandaloneWalletHome({ wallet, onDelete, onBack }: Props) {
                       : chainBals.length === 0
                         ? <div className="px-4 py-3 text-xs" style={{ color: 'var(--muted)' }}>No tokens</div>
                         : chainBals.map(b => (
-                          <TokenBalanceRow key={`${b.chainId}-${b.symbol}`} balance={b} chainColor={chain.color} />
+                          <TokenBalanceRow key={`${b.chainId}-${b.symbol}`} balance={b} meta={tokens[idForSymbol(b.symbol) ?? '']} />
                         ))
                     }
                     <div className="px-4 pb-3">
@@ -302,59 +303,55 @@ function ChainBadge({ chain }: { chain: WalletChainConfig }) {
 }
 
 // ---- Token balance row -----------------------------------------------------
-function TokenBalanceRow({ balance: b, chainColor }: { balance: TokenBalance; chainColor: string }) {
+function TokenBalanceRow({ balance: b, meta }: { balance: TokenBalance; meta?: TokenMeta }) {
+  const amount = parseFloat(b.balance)
   return (
     <div className="flex items-center gap-3 px-4 py-3">
-      <div className="size-8 rounded-full flex items-center justify-center text-xs font-bold text-white shrink-0" style={{ background: chainColor }}>
-        {b.symbol.slice(0, 1)}
-      </div>
+      <TokenIcon symbol={b.symbol} image={meta?.image} size={34} />
       <div className="flex-1 min-w-0">
-        <div className="flex justify-between items-baseline">
-          <span className="text-sm font-medium" style={{ color: 'var(--ink)' }}>{b.symbol}</span>
-          <span className="text-sm font-medium tabular-nums" style={{ color: 'var(--ink)' }}>${b.usdValue.toFixed(2)}</span>
+        <div className="flex justify-between items-baseline gap-2">
+          <span className="text-sm font-semibold" style={{ color: 'var(--ink)' }}>
+            {b.symbol} <span className="font-normal text-xs" style={{ color: 'var(--subtle)' }}>{meta?.name ?? ''}</span>
+          </span>
+          <span className="text-sm font-semibold tabular-nums" style={{ color: 'var(--ink)' }}>${b.usdValue.toFixed(2)}</span>
         </div>
-        <span className="text-xs" style={{ color: b.error ? 'var(--danger)' : 'var(--subtle)' }}>
-          {b.error ? "Couldn't load — tap Live to retry" : `${parseFloat(b.balance).toFixed(b.symbol === 'USDC' ? 2 : 6)} ${b.symbol}`}
-        </span>
+        <div className="flex justify-between items-baseline gap-2">
+          <span className="text-xs tabular-nums" style={{ color: b.error ? 'var(--danger)' : 'var(--subtle)' }}>
+            {b.error ? "Couldn't load — tap Live to retry" : `${amount.toLocaleString('en-US', { maximumFractionDigits: b.symbol === 'USDC' ? 2 : 6 })} ${b.symbol}`}
+          </span>
+          {meta && <span className="text-xs tabular-nums" style={{ color: 'var(--subtle)' }}>{formatUsdPrice(meta.price)} each</span>}
+        </div>
       </div>
     </div>
   )
 }
 
 // ---- Live prices ------------------------------------------------------------
+const PRICE_LIST = ['usd-coin', 'bitcoin', 'ethereum', 'solana', 'arbitrum', 'polygon-ecosystem-token']
+
 function LivePrices() {
-  const { prices, loading } = useTokenPrices()
-  const tokens = [
-    { symbol: 'USDC',  id: 'usd-coin',      color: '#2775ca' },
-    { symbol: 'ETH',   id: 'ethereum',       color: '#627eea' },
-    { symbol: 'MATIC', id: 'matic-network',  color: '#8247e5' },
-    { symbol: 'ARB',   id: 'arbitrum',       color: '#12aaff' },
-    { symbol: 'BTC',   id: 'bitcoin',        color: '#f7931a' },
-    { symbol: 'SOL',   id: 'solana',         color: '#9945ff' },
-  ]
+  const { tokens, loading, source } = useTokenPrices()
   return (
     <div className="rounded-2xl p-4" style={{ background: 'var(--surface-strong)', border: '1.5px solid var(--border)' }}>
       <div className="flex items-center justify-between mb-3">
         <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--subtle)' }}>Live prices</span>
-        <span className="text-xs" style={{ color: 'var(--subtle)' }}>CoinGecko</span>
+        <span className="text-xs" style={{ color: 'var(--subtle)' }}>{source === 'live' ? 'CoinGecko · 24h' : loading ? 'Loading…' : 'Estimates (offline)'}</span>
       </div>
-      <div className="grid grid-cols-2 gap-3">
-        {tokens.map(t => {
-          const price = prices[t.id]
+      <div className="grid grid-cols-2 gap-x-3 gap-y-3">
+        {PRICE_LIST.map(id => tokens[id]).filter(Boolean).map(t => {
+          const up = (t.change24h ?? 0) >= 0
           return (
-            <div key={t.id} className="flex items-center gap-2">
-              <div className="size-7 rounded-full flex items-center justify-center text-xs font-bold text-white shrink-0" style={{ background: t.color }}>
-                {t.symbol.slice(0, 1)}
-              </div>
+            <div key={t.id} className="flex items-center gap-2 min-w-0">
+              <TokenIcon symbol={t.symbol} image={t.image} size={30} />
               <div className="min-w-0">
-                <div className="text-xs font-semibold" style={{ color: 'var(--ink)' }}>{t.symbol}</div>
-                <div className="text-xs font-medium tabular-nums" style={{ color: 'var(--accent)' }}>
-                  {loading ? '…' : price != null
-                    ? `$${price.toLocaleString('en-US', {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: price > 100 ? 2 : 4,
-                      })}`
-                    : '—'}
+                <div className="text-xs font-bold" style={{ color: 'var(--ink)' }}>{t.symbol}</div>
+                <div className="text-xs font-medium tabular-nums" style={{ color: 'var(--ink)' }}>
+                  {formatUsdPrice(t.price)}
+                  {t.change24h != null && (
+                    <span className="ml-1" style={{ color: up ? 'var(--success)' : 'var(--danger)' }}>
+                      {up ? '▲' : '▼'}{Math.abs(t.change24h).toFixed(1)}%
+                    </span>
+                  )}
                 </div>
               </div>
             </div>
@@ -445,6 +442,7 @@ function SendSheet({
   onClose: () => void
   onSent: () => void
 }) {
+  const { tokens: priceTokens } = useTokenPrices()
   const [selectedChain, setSelectedChain] = useState(chains[0])
   const tokens = CHAIN_TOKENS[selectedChain.id] ?? []
   const [selectedToken, setSelectedToken] = useState(tokens[0])
@@ -543,12 +541,13 @@ function SendSheet({
                   <button
                     key={t.symbol}
                     onClick={() => setSelectedToken(t)}
-                    className="px-3 py-1.5 rounded-xl text-xs font-semibold"
+                    className="pl-1.5 pr-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5"
                     style={{
                       background: selectedToken.symbol === t.symbol ? 'var(--accent)' : 'var(--surface-strong)',
                       color: selectedToken.symbol === t.symbol ? 'white' : 'var(--muted)',
                     }}
                   >
+                    <TokenIcon symbol={t.symbol} image={priceTokens[t.geckoId]?.image} size={20} />
                     {t.symbol}
                   </button>
                 ))}

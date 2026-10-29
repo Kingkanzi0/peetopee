@@ -19,6 +19,7 @@ import {
 } from '../wallet/appWallet'
 import { recordTx, updateTxStatus } from '../history/txHistory'
 import { TransactionHistory } from './TransactionHistory'
+import { NotifyPrompt } from './NotifyPrompt'
 import { useNairaConfig, useNairaBalance, formatNaira } from '../naira/nairaToken'
 
 export { useVisitingCountry } from '../hooks/useMoney'
@@ -84,6 +85,8 @@ export function FundsScreen({ onSell, onOpenWallet, onOpenNaira }: Props) {
           </select>
         </label>
       </div>
+
+      <NotifyPrompt />
 
       {/* Funds (trading) card */}
       <div className="rounded-2xl p-5 mb-3" style={{ background: 'linear-gradient(135deg, #0f2557 0%, #1d4ed8 100%)' }}>

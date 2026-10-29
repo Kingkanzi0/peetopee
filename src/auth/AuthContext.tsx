@@ -38,6 +38,8 @@ interface AuthState {
   signOut: () => void
   updateCountry: (country: CountryDef) => void
   updateProfile: (partial: Partial<UserProfile>) => void
+  /** Update the profile and wait until the server has it (throws if it couldn't be saved). */
+  saveProfileNow: (partial: Partial<UserProfile>) => Promise<void>
   /** Change your @handle. Throws with a readable message if it's taken or invalid. */
   changePtpId: (handle: string) => Promise<string>
   refreshAccount: () => Promise<void>
@@ -149,6 +151,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     })
   }, [pushProfile])
 
+  const saveProfileNow = useCallback(async (partial: Partial<UserProfile>) => {
+    if (!profile) return
+    const updated = { ...profile, ...partial }
+    await apiRegister({
+      displayName: updated.name,
+      countryCode: updated.country?.code ?? '',
+      avatarUrl: updated.avatarDataUrl ?? '',
+    })
+    commit(updated)
+  }, [profile, commit])
+
   const changePtpId = useCallback(async (handle: string) => {
     const ptpId = await apiUpdateHandle(handle)
     setProfile(prev => {
@@ -163,7 +176,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const kycStatus: KycStatus = account?.kyc.status ?? 'none'
 
   return (
-    <AuthContext.Provider value={{ profile, account, kycStatus, signIn, signOut, updateCountry, updateProfile, changePtpId, refreshAccount }}>
+    <AuthContext.Provider value={{ profile, account, kycStatus, signIn, signOut, updateCountry, updateProfile, saveProfileNow, changePtpId, refreshAccount }}>
       {children}
     </AuthContext.Provider>
   )

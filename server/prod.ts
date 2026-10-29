@@ -18,7 +18,7 @@ const db = new Database(DB_PATH, { create: true })
 db.exec('PRAGMA synchronous=FULL;')
 const api = createApi(optionsFromEnv(db, DB_PATH))
 
-const API_ROUTES = /^\/(health|lookup|me|register|update-handle|link-wallet|auth\/|kyc\/|trade-details|trade-evidence|admin\/|rpc$|history|config$|payouts)/
+const API_ROUTES = /^\/(health|lookup|me|register|update-handle|link-wallet|auth\/|kyc\/|trade-details|trade-evidence|admin\/|rpc$|history|config$|payouts|prices$)/
 
 // ── static files ────────────────────────────────────────────────────────────
 
