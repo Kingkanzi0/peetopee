@@ -196,6 +196,25 @@ export async function apiListEvidence(tradeId: bigint): Promise<Evidence[]> {
   return res.evidence
 }
 
+// ── trade chat ──────────────────────────────────────────────────────────────
+
+export interface ChatMessage {
+  id: number
+  role: 'seller' | 'trader'
+  text: string
+  createdAt: number
+}
+
+export async function apiChatList(tradeId: bigint, after = 0) {
+  return request<{ myRole: 'seller' | 'trader'; messages: ChatMessage[] }>(
+    'GET', `/trade-chat?tradeId=${tradeId.toString()}&after=${after}`, undefined, true)
+}
+
+export async function apiChatSend(tradeId: bigint, text: string) {
+  const res = await request<{ message: ChatMessage }>('POST', '/trade-chat', { tradeId: tradeId.toString(), text }, true)
+  return res.message
+}
+
 // ── naira account ───────────────────────────────────────────────────────────
 
 export interface ServerConfig {
@@ -279,6 +298,7 @@ export const adminApi = {
       trader: { ptpId: string; name: string; contact: string } | null
       bankDetails: string | null
       evidence: Evidence[]
+      chat?: ChatMessage[]
     }>('GET', `/admin/dispute?tradeId=${tradeId.toString()}`, token),
   payouts: (token: string, status: Payout['status']) =>
     adminRequest<{ payouts: Payout[] }>('GET', `/admin/payouts?status=${status}`, token).then(r => r.payouts),

@@ -20,6 +20,7 @@ import {
 import { recordTx, updateTxStatus } from '../history/txHistory'
 import { TransactionHistory } from './TransactionHistory'
 import { NotifyPrompt } from './NotifyPrompt'
+import { BackupReminder } from '../wallet/BackupWallet'
 import { useNairaConfig, useNairaBalance, formatNaira } from '../naira/nairaToken'
 
 export { useVisitingCountry } from '../hooks/useMoney'
@@ -86,6 +87,7 @@ export function FundsScreen({ onSell, onOpenWallet, onOpenNaira }: Props) {
         </label>
       </div>
 
+      <BackupReminder />
       <NotifyPrompt />
 
       {/* Funds (trading) card */}

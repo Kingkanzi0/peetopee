@@ -177,6 +177,23 @@ function DisputeDetail({ trade, adminToken, canResolve, onBack, onResolved }: {
       </div>
 
       <div>
+        <div className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--subtle)' }}>Chat between them</div>
+        {!info ? <Loader2 className="size-4 animate-spin" /> : !info.chat?.length ? (
+          <p className="text-sm" style={{ color: 'var(--muted)' }}>No messages.</p>
+        ) : (
+          <div className="rounded-xl p-3 space-y-1.5 max-h-72 overflow-y-auto text-sm" style={{ background: 'var(--surface-muted)' }}>
+            {info.chat.map(m => (
+              <div key={m.id}>
+                <span className="font-semibold capitalize" style={{ color: m.role === 'seller' ? 'var(--accent)' : 'var(--success)' }}>{m.role}</span>
+                <span className="text-xs ml-1.5" style={{ color: 'var(--subtle)' }}>{new Date(m.createdAt).toLocaleString()}</span>
+                <p className="whitespace-pre-wrap break-words" style={{ color: 'var(--ink)' }}>{m.text}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div>
         <div className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--subtle)' }}>Evidence</div>
         {info ? <EvidenceList evidence={info.evidence} /> : <Loader2 className="size-4 animate-spin" />}
       </div>

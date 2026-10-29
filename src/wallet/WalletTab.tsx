@@ -11,7 +11,7 @@ import {
   Copy, Check, AlertTriangle, Trash2, ArrowLeft,
 } from 'lucide-react'
 import {
-  loadStoredWallet, saveWallet, deleteWallet,
+  loadStoredWallet, saveWallet, deleteWallet, isWalletBackedUp,
   generateMnemonic, deriveFromMnemonic, deriveFromPrivateKey,
   type StoredWallet,
 } from './standaloneWallet'
@@ -29,7 +29,10 @@ export function WalletTab({ onBack }: { onBack?: () => void }) {
   }
 
   function handleDelete() {
-    if (!confirm('Delete this wallet? Make sure you have your seed phrase backed up.')) return
+    const warning = isWalletBackedUp()
+      ? 'Remove this wallet from this phone? You can restore it later with your recovery phrase.'
+      : "You haven't backed up this wallet. If you remove it, the money in it is gone for good. Remove anyway?"
+    if (!confirm(warning)) return
     deleteWallet()
     setWallet(null)
     setScreen('home')
@@ -134,7 +137,7 @@ function CreateWalletScreen({
 
   async function create() {
     const privKey = deriveFromMnemonic(mnemonic)
-    await saveWallet(privKey, 'created')
+    await saveWallet(privKey, 'created', mnemonic, backed)
     const saved = loadStoredWallet()
     if (saved) onCreated(saved)
   }
@@ -232,6 +235,7 @@ function ImportWalletScreen({
     setError('')
     try {
       let privKey: `0x${string}`
+      let phrase: string | undefined
       if (mode === 'phrase') {
         const words = input.trim().split(/\s+/)
         if (words.length !== 12 && words.length !== 24) {
@@ -243,10 +247,11 @@ function ImportWalletScreen({
           return
         }
         privKey = deriveFromMnemonic(input.trim())
+        phrase = input.trim().toLowerCase().split(/\s+/).join(' ')
       } else {
         privKey = deriveFromPrivateKey(input.trim())
       }
-      await saveWallet(privKey, 'imported')
+      await saveWallet(privKey, 'imported', phrase)
       const saved = loadStoredWallet()
       if (saved) onImported(saved)
     } catch (e) {

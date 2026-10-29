@@ -1,6 +1,6 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { useAccount } from 'wagmi'
-import { ShoppingBag, LayoutDashboard, Wallet, Banknote, Send } from 'lucide-react'
+import { ShoppingBag, LayoutDashboard, Wallet, Banknote, Send, MessageCircle } from 'lucide-react'
 import { WalletBar } from './components/WalletBar'
 import { TraderList } from './components/TraderList'
 import { SellFlow } from './components/SellFlow'
@@ -28,7 +28,8 @@ import { useWalletSession } from './wallet/useWalletSession'
 import type { SendStart } from './components/SendScreen'
 import { useNairaConfig } from './naira/nairaToken'
 import { useIncomingFunds } from './hooks/useIncomingFunds'
-import { initNotifications } from './notify/notify'
+import { initNotifications, notify } from './notify/notify'
+import { useTradeChat } from './hooks/useTradeChat'
 import { useAppWallet } from './wallet/appWallet'
 
 type Screen =
@@ -101,15 +102,23 @@ function MainApp() {
   useEffect(() => { initNotifications() }, [])
 
   const [chatOpen, setChatOpen] = useState(false)
-  const [chatTradeId, setChatTradeId] = useState<bigint | null>(null)
-  const [chatCounterparty, setChatCounterparty] = useState('')
+  // The chat for the trade on screen: polled while you look at the trade, even with the chat closed.
+  const chatTradeId = tab === 'market' && screen.id === 'trade' ? screen.tradeId : null
+  const chat = useTradeChat(chatTradeId, chatOpen)
+  const seenChat = useRef(-1) // -1 until the first load, so old messages don't pop up
+  useEffect(() => {
+    // Toast for a new message from the other side while the chat is closed.
+    if (seenChat.current < 0) { if (chat.myRole) seenChat.current = chat.messages.length; return }
+    if (chatOpen || !chat.myRole || chatTradeId == null) { seenChat.current = chat.messages.length; return }
+    const fresh = chat.messages.slice(seenChat.current).filter(m => m.role !== chat.myRole)
+    seenChat.current = chat.messages.length
+    const last = fresh[fresh.length - 1]
+    if (last) void notify(`New message from the ${last.role}`, last.text.slice(0, 120), `ptp-chat-${chatTradeId}-${last.id}`)
+  }, [chat.messages, chat.myRole, chatOpen, chatTradeId])
+  useEffect(() => { setChatOpen(false); seenChat.current = -1 }, [chatTradeId])
 
-  function goToTrade(tradeId: bigint, counterparty?: string) {
+  function goToTrade(tradeId: bigint, _counterparty?: string) {
     setScreen({ id: 'trade', tradeId })
-    if (counterparty) {
-      setChatTradeId(tradeId)
-      setChatCounterparty(counterparty)
-    }
     setTab('market')
   }
 
@@ -180,11 +189,15 @@ function MainApp() {
                   />
                   <div className="mx-auto max-w-lg px-4">
                     <button
-                      onClick={() => { setChatOpen(true); setChatTradeId(screen.tradeId) }}
+                      onClick={() => setChatOpen(true)}
                       className="mt-2 w-full rounded-2xl py-3 text-sm font-medium flex items-center justify-center gap-2"
                       style={{ background: 'var(--surface-muted)', color: 'var(--ink)' }}
                     >
-                      Open chat with counterparty
+                      <MessageCircle className="size-4" />
+                      Chat with the {chat.myRole === 'trader' ? 'seller' : 'trader'}
+                      {chat.unread > 0 && (
+                        <span className="rounded-full px-2 py-0.5 text-[11px] font-bold text-white" style={{ background: 'var(--danger)' }}>{chat.unread}</span>
+                      )}
                     </button>
                   </div>
                 </>
@@ -239,11 +252,7 @@ function MainApp() {
 
         {/* Chat overlay */}
         {chatOpen && chatTradeId !== null && (
-          <TradeChat
-            tradeId={chatTradeId}
-            counterpartyAddress={chatCounterparty || '0x0000000000000000000000000000000000000000'}
-            onClose={() => setChatOpen(false)}
-          />
+          <TradeChat tradeId={chatTradeId} chat={chat} onClose={() => setChatOpen(false)} />
         )}
       </div>
   )
