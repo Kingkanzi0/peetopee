@@ -10,7 +10,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useReadContract, useReadContracts } from 'wagmi'
 import { formatUnits } from 'viem'
-import { ArrowLeft, Building2, ChevronRight, Loader2, ShieldCheck, BadgePlus, Info } from 'lucide-react'
+import { ArrowLeft, Building2, ChevronRight, Loader2, ShieldCheck, Info } from 'lucide-react'
 import {
   PEETOPEE_ESCROW, ARC_TESTNET_CHAIN_ID, COUNTRIES, getCountryByCode, formatRate, IS_ESCROW_V2,
   type CountryDef, type TraderProfile,
@@ -24,7 +24,6 @@ interface Props {
   onBack: () => void
   onTradeCreated: (tradeId: bigint) => void
   onAddFunds: () => void
-  onRegisterTrader: () => void
 }
 
 const SCALE = 1_000_000n
@@ -44,7 +43,7 @@ function usdcFor(localScaled: bigint, rate: bigint): bigint {
 
 interface Quote { trader: TraderProfile; usdc: bigint }
 
-export function PayBankScreen({ initialCountry, onBack, onTradeCreated, onAddFunds, onRegisterTrader }: Props) {
+export function PayBankScreen({ initialCountry, onBack, onTradeCreated, onAddFunds }: Props) {
   const [country, setCountry] = useState<CountryDef>(initialCountry ?? getCountryByCode('NG')!)
   const rules = bankRulesFor(country.code)
   const [bank, setBank] = useState('')
@@ -211,9 +210,7 @@ export function PayBankScreen({ initialCountry, onBack, onTradeCreated, onAddFun
           <div className="rounded-2xl p-5 text-center space-y-3" style={{ background: 'var(--surface-muted)' }}>
             <p className="text-sm font-semibold" style={{ color: 'var(--ink)' }}>No verified traders in {country.name} yet</p>
             <p className="text-xs" style={{ color: 'var(--muted)' }}>Payments need at least one ID-verified trader paying out {country.currency}.</p>
-            <button onClick={onRegisterTrader} className="inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold text-white" style={{ background: 'var(--accent)' }}>
-              <BadgePlus className="size-4" /> Become a trader
-            </button>
+            <p className="text-xs" style={{ color: 'var(--subtle)' }}>Want to be a trader? Use the Trader tab below.</p>
           </div>
         ) : localScaled === 0n ? null : quotes.length === 0 ? (
           <div className="rounded-2xl p-4 flex items-start gap-2" style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)' }}>

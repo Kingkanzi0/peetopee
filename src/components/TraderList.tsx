@@ -9,7 +9,6 @@ interface Props {
   country: CountryDef
   onBack: () => void
   onSelectTrader: (trader: TraderProfile) => void
-  onRegisterTrader?: () => void
 }
 
 function TraderCard({ address, country, verified, minBond, onSelect }: {
@@ -135,7 +134,7 @@ function TraderCard({ address, country, verified, minBond, onSelect }: {
   )
 }
 
-export function TraderList({ country, onBack, onSelectTrader, onRegisterTrader }: Props) {
+export function TraderList({ country, onBack, onSelectTrader }: Props) {
   const { data: traders, isLoading } = useReadContract({
     ...PEETOPEE_ESCROW,
     functionName: 'getTradersByCountry',
@@ -203,14 +202,7 @@ export function TraderList({ country, onBack, onSelectTrader, onRegisterTrader }
               Be the first to offer {country.currency} here and start earning.
             </p>
           </div>
-          <button
-            onClick={onRegisterTrader}
-            className="inline-flex items-center gap-2 rounded-2xl px-6 py-3 text-sm font-semibold text-white transition-all active:scale-95"
-            style={{ background: 'var(--accent)' }}
-          >
-            <BadgePlus className="size-4" />
-            Register as a trader
-          </button>
+          <p className="text-xs" style={{ color: 'var(--subtle)' }}>Want to be a trader? Use the Trader tab below.</p>
         </div>
       )}
 
@@ -220,18 +212,6 @@ export function TraderList({ country, onBack, onSelectTrader, onRegisterTrader }
             verified={verified === null ? undefined : !!verified[addr.toLowerCase()]} />
         ))}
       </div>
-
-      {/* Always show register CTA at bottom when there are existing traders too */}
-      {!isLoading && traderAddresses.length > 0 && (
-        <button
-          onClick={onRegisterTrader}
-          className="mt-4 w-full flex items-center justify-center gap-2 rounded-2xl py-3 text-sm font-medium transition-all active:scale-95"
-          style={{ background: 'var(--surface-muted)', color: 'var(--accent)' }}
-        >
-          <BadgePlus className="size-4" />
-          Become a trader in {country.name}
-        </button>
-      )}
     </div>
   )
 }
