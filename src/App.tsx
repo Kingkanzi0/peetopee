@@ -39,7 +39,7 @@ type Screen =
   | { id: 'trade'; tradeId: bigint }
   | { id: 'paybank' }
 
-type Tab = 'market' | 'send' | 'funds' | 'wallet' | 'trader'
+type Tab = 'wallet' | 'send' | 'funds' | 'market' | 'trader'
 
 export default function App() {
   const { profile } = useAuth()
@@ -88,9 +88,8 @@ function MainApp() {
   useWalletSession()
 
   const [showProfile, setShowProfile] = useState(false)
-  const [tab, setTab] = useState<Tab>('market')
+  const [tab, setTab] = useState<Tab>('wallet')
   const [screen, setScreen] = useState<Screen>({ id: 'market' })
-  const [openTraderRegister, setOpenTraderRegister] = useState(false)
   const [sendStart, setSendStart] = useState<SendStart>('choose')
   const naira = useNairaConfig()
   const openSend = (start: SendStart) => { setSendStart(start); setTab('send') }
@@ -160,7 +159,6 @@ function MainApp() {
                   country={screen.country}
                   onBack={() => setScreen({ id: 'market' })}
                   onSelectTrader={t => setScreen({ id: 'sell', country: screen.country, trader: t })}
-                  onRegisterTrader={() => { setOpenTraderRegister(true); setTab('trader') }}
                 />
               )}
               {screen.id === 'paybank' && (
@@ -169,7 +167,6 @@ function MainApp() {
                   onBack={() => setScreen({ id: 'market' })}
                   onTradeCreated={id => goToTrade(id)}
                   onAddFunds={() => setTab('funds')}
-                  onRegisterTrader={() => { setOpenTraderRegister(true); setTab('trader') }}
                 />
               )}
               {screen.id === 'sell' && (
@@ -218,14 +215,12 @@ function MainApp() {
           {tab === 'funds' && <FundsScreen onSell={openTraders} onOpenWallet={() => setTab('wallet')} onOpenNaira={() => openSend('naira')} />}
 
           {/* WALLET TAB */}
-          {tab === 'wallet' && <WalletTab onBack={() => setTab('market')} />}
+          {tab === 'wallet' && <WalletTab />}
 
           {/* TRADER TAB */}
           {tab === 'trader' && (
             <TraderDashboard
               onTradeClick={id => goToTrade(id)}
-              openRegister={openTraderRegister}
-              onRegisterOpened={() => setOpenTraderRegister(false)}
               onOpenWallet={() => setTab('wallet')}
             />
           )}
@@ -243,10 +238,10 @@ function MainApp() {
             paddingBottom: 'env(safe-area-inset-bottom, 0px)',
           }}
         >
-          <NavTab active={tab === 'market'} label="Market" icon={<ShoppingBag className="size-5" />} onClick={() => { setTab('market'); setScreen({ id: 'market' }) }} />
+          <NavTab active={tab === 'wallet'} label="Wallet" icon={<Wallet className="size-5" />} onClick={() => setTab('wallet')} />
           <NavTab active={tab === 'send'} label="Send" icon={<Send className="size-5" />} onClick={() => openSend('choose')} />
           <NavTab active={tab === 'funds'} label="Funds" icon={<Banknote className="size-5" />} onClick={() => setTab('funds')} />
-          <NavTab active={tab === 'wallet'} label="Wallet" icon={<Wallet className="size-5" />} onClick={() => setTab('wallet')} />
+          <NavTab active={tab === 'market'} label="Market" icon={<ShoppingBag className="size-5" />} onClick={() => { setTab('market'); setScreen({ id: 'market' }) }} />
           <NavTab active={tab === 'trader'} label="Trader" icon={<LayoutDashboard className="size-5" />} onClick={() => setTab('trader')} />
         </nav>
 
